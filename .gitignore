@@ -78,3 +78,8 @@ target/
 
 frontend/src-tauri/binaries/
 Cargo.lock
+
+# Рабочие заметки (не для репо)
+ВОПРОСЫ_GEO.md
+ГОТОВО.md
+ОТВЕТ_GEO_FIXES.md
