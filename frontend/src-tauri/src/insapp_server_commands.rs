@@ -65,45 +65,48 @@ pub async fn insapp_set_api_key<R: Runtime>(
 struct RegisterResponse {
     #[serde(rename = "apiKey")]
     api_key: String,
-    #[serde(rename = "fullName")]
-    full_name: String,
+    #[serde(rename = "login")]
+    login: String,
+    #[serde(rename = "role")]
+    role: String,
     #[serde(rename = "deviceLabel")]
     device_label: String,
 }
 
-/// Self-registration на корпоративном сервере Insapp.
-/// Шлёт ФИО → получает API ключ → сохраняет его автоматически.
-/// Используется в onboarding (первый запуск приложения).
+/// Вход на корпоративном сервере Insapp по логину и паролю (те же что для дашборда).
+/// Шлёт login+password → сервер проверяет → выдаёт API-ключ привязанный к учётке →
+/// клиент сохраняет ключ + логин. Используется в onboarding (первый запуск).
 #[tauri::command]
 pub async fn insapp_register_with_server<R: Runtime>(
     _app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
-    full_name: String,
+    login: String,
+    password: String,
     device_label: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let pool = state.db_manager.pool();
     let settings = insapp_server::load_settings(pool).await;
 
-    if full_name.trim().is_empty() {
-        return Err("Введи имя и фамилию".to_string());
+    if login.trim().is_empty() || password.is_empty() {
+        return Err("Введи логин и пароль".to_string());
     }
 
     let url = format!("{}/api/v1/clients/register", settings.server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let device = device_label.unwrap_or_else(|| {
-        let hostname = std::process::Command::new("hostname")
+        std::process::Command::new("hostname")
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .map(|s| s.trim().to_string())
-            .unwrap_or_else(|| "Mac".to_string());
-        hostname
+            .unwrap_or_else(|| "Mac".to_string())
     });
 
     let response = client
         .post(&url)
         .json(&serde_json::json!({
-            "fullName": full_name.trim(),
+            "login": login.trim(),
+            "password": password,
             "deviceLabel": device,
         }))
         .send()
@@ -113,7 +116,6 @@ pub async fn insapp_register_with_server<R: Runtime>(
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
-        // Парсим ошибку из server response для дружелюбного сообщения
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
             if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
                 return Err(err.to_string());
@@ -127,12 +129,14 @@ pub async fn insapp_register_with_server<R: Runtime>(
         .await
         .map_err(|e| format!("Не удалось разобрать ответ сервера: {}", e))?;
 
-    insapp_server::set_credentials(&parsed.api_key, &parsed.full_name)
+    // Сохраняем ключ + логин (в поле full_name храним логин для отображения "вошёл как")
+    insapp_server::set_credentials(&parsed.api_key, &parsed.login)
         .map_err(|e| format!("Не удалось сохранить ключ: {}", e))?;
 
     Ok(serde_json::json!({
         "registered": true,
-        "full_name": parsed.full_name,
+        "login": parsed.login,
+        "role": parsed.role,
         "device_label": parsed.device_label,
     }))
 }

@@ -83,24 +83,28 @@ function RegistrationBlock({
   status: InsappServerStatus | null;
   onChanged: () => Promise<void>;
 }) {
-  const [fullName, setFullName] = useState("");
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
 
   const handleRegister = async () => {
-    const name = fullName.trim();
-    if (name.length < 2) {
-      toast.error("Введи имя и фамилию");
+    if (login.trim().length < 2 || password.length < 1) {
+      toast.error("Введи логин и пароль");
       return;
     }
     setIsRegistering(true);
     try {
-      await invoke("insapp_register_with_server", { fullName: name });
-      toast.success(`Готово, ${name} - ключ создан`);
-      setFullName("");
+      await invoke<{ login: string }>("insapp_register_with_server", {
+        login: login.trim(),
+        password,
+      });
+      toast.success(`Вошёл как ${login.trim()}`);
+      setLogin("");
+      setPassword("");
       await onChanged();
     } catch (e) {
       const msg = typeof e === "string" ? e : (e as any)?.message || String(e);
-      toast.error("Не удалось зарегистрироваться", { description: msg });
+      toast.error("Не удалось войти", { description: msg });
     } finally {
       setIsRegistering(false);
     }
@@ -108,32 +112,44 @@ function RegistrationBlock({
 
   if (status?.is_registered) {
     return (
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-600 mb-0.5">Ты вошёл как</p>
-          <p className="text-base font-semibold text-gray-900">{status.full_name || "—"}</p>
-          <p className="text-xs text-gray-500 mt-1">
-            Встречи на сервере подписаны твоим именем.
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-gray-400 mb-2">
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-sm text-gray-600 mb-0.5">Ты вошёл как</p>
+            <p className="text-base font-semibold text-gray-900">{status.full_name || "—"}</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Встречи на сервере подписаны этой учёткой.
+            </p>
+          </div>
+          <p className="text-xs text-gray-400">
             Ключ:{" "}
             <code className="px-1.5 py-0.5 bg-gray-100 rounded font-mono">
               {status.api_key_preview}
             </code>
           </p>
+        </div>
+        <p className="text-xs text-gray-500 mb-2">Сменить учётку - войти под другим логином:</p>
+        <div className="flex items-center gap-2">
           <input
             type="text"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder="Сменить имя"
-            className="w-40 px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 mr-2"
+            value={login}
+            onChange={(e) => setLogin(e.target.value)}
+            placeholder="логин"
+            autoComplete="username"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="пароль"
+            autoComplete="current-password"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             onKeyDown={(e) => { if (e.key === "Enter") handleRegister(); }}
           />
-          <Button size="sm" variant="outline" onClick={handleRegister} disabled={isRegistering || fullName.trim().length < 2}>
-            {isRegistering && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
-            Перерегистрировать
+          <Button variant="outline" onClick={handleRegister} disabled={isRegistering || login.trim().length < 2 || !password}>
+            {isRegistering && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            Войти
           </Button>
         </div>
       </div>
@@ -143,21 +159,30 @@ function RegistrationBlock({
   return (
     <div>
       <p className="text-sm text-gray-600 mb-3">
-        Введи имя и фамилию - сервер создаст тебе персональный ключ, и твои
-        встречи будут подписаны в общих отчётах.
+        Войди под своей учётной записью - тем же логином и паролем, что для
+        дашборда. Сервер выдаст ключ, привязанный к твоей учётке.
       </p>
       <div className="flex items-center gap-2">
         <input
           type="text"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          placeholder="Иван Иванов"
+          value={login}
+          onChange={(e) => setLogin(e.target.value)}
+          placeholder="логин (например geom)"
+          autoComplete="username"
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="пароль"
+          autoComplete="current-password"
           className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           onKeyDown={(e) => { if (e.key === "Enter") handleRegister(); }}
         />
-        <Button onClick={handleRegister} disabled={isRegistering || fullName.trim().length < 2}>
+        <Button onClick={handleRegister} disabled={isRegistering || login.trim().length < 2 || !password}>
           {isRegistering && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-          Зарегистрироваться
+          Войти
         </Button>
       </div>
     </div>

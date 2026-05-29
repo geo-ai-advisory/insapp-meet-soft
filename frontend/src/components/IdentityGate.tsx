@@ -21,30 +21,29 @@ interface IdentityGateProps {
  * в Настройки → Сервер Insapp).
  */
 export function IdentityGate({ onDone }: IdentityGateProps) {
-  const [fullName, setFullName] = useState("");
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string>("");
 
   useEffect(() => {
-    // Подтягиваем адрес сервера для подсказки
     invoke<{ settings: { server_url: string } }>("insapp_get_status")
       .then((s) => setServerUrl(s.settings.server_url))
       .catch(() => {});
   }, []);
 
   const handleRegister = async () => {
-    const name = fullName.trim();
-    if (name.length < 2) {
-      setError("Введи имя и фамилию");
+    if (login.trim().length < 2 || password.length < 1) {
+      setError("Введи логин и пароль");
       return;
     }
     setIsLoading(true);
     setError(null);
     try {
-      await invoke<{ registered: boolean; full_name: string }>(
+      await invoke<{ registered: boolean; login: string }>(
         "insapp_register_with_server",
-        { fullName: name },
+        { login: login.trim(), password },
       );
       onDone();
     } catch (e) {
@@ -84,28 +83,40 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
           <div className="flex items-center gap-2 mb-1">
             <Sparkles className="w-4 h-4 text-blue-600 stroke-[1.75]" />
             <h2 className="text-base font-semibold text-gray-900">
-              Давай познакомимся
+              Вход
             </h2>
           </div>
           <p className="text-sm text-gray-600 mb-5">
-            Введи имя и фамилию - так в общих отчётах будет видно, чьи это встречи.
-            Это нужно сделать один раз.
+            Войди под своей учётной записью - тем же логином и паролем, что для
+            дашборда. Встречи будут подписаны твоей учёткой. Это нужно один раз.
           </p>
 
           <label className="block text-xs font-medium text-gray-500 mb-1.5">
-            Имя и фамилия
+            Логин
           </label>
           <input
             type="text"
-            value={fullName}
-            onChange={(e) => {
-              setFullName(e.target.value);
-              setError(null);
-            }}
+            value={login}
+            onChange={(e) => { setLogin(e.target.value); setError(null); }}
             onKeyDown={handleKeyDown}
-            placeholder="Иван Иванов"
+            placeholder="geom"
             autoFocus
             disabled={isLoading}
+            autoComplete="username"
+            className="w-full h-10 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 mb-3"
+          />
+
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">
+            Пароль
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setError(null); }}
+            onKeyDown={handleKeyDown}
+            placeholder="••••••••"
+            disabled={isLoading}
+            autoComplete="current-password"
             className="w-full h-10 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 mb-1"
           />
 
@@ -116,17 +127,17 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
           <Button
             variant="ai"
             onClick={handleRegister}
-            disabled={isLoading || fullName.trim().length < 2}
+            disabled={isLoading || login.trim().length < 2 || password.length < 1}
             className="w-full mt-4 h-10"
           >
             {isLoading ? (
               <>
                 <Loader2 className="animate-spin" />
-                Регистрирую...
+                Вхожу...
               </>
             ) : (
               <>
-                Начать работу
+                Войти
                 <ArrowRight />
               </>
             )}
