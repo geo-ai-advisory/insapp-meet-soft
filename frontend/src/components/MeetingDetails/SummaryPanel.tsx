@@ -6,9 +6,13 @@ import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISu
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
-import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { AiTerminalLauncher } from '@/components/AiTerminalLauncher';
+import { SummarySyncBadge } from '@/components/SummarySyncBadge';
+import { Button } from '@/components/ui/button';
+import { Save, Copy, Loader2 } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RefObject } from 'react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface SummaryPanelProps {
   meeting: {
@@ -48,6 +52,9 @@ interface SummaryPanelProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  /** Прямой callback от TerminalPanel когда AI-резюме сохранено -
+      даём page.tsx сразу обновить aiSummary, не дожидаясь event'а. */
+  onAiSummarySaved?: (markdown: string) => void;
 }
 
 export function SummaryPanel({
@@ -83,117 +90,111 @@ export function SummaryPanel({
   selectedTemplate,
   onTemplateSelect,
   isModelConfigLoading = false,
-  onOpenModelSettings
+  onOpenModelSettings,
+  onAiSummarySaved,
 }: SummaryPanelProps) {
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
+  // sync_status и synced_at лежат в JSON summary_processes.result,
+  // которое page.tsx распарсивает и кладёт в aiSummary целиком.
+  // Тип Summary не описывает эти поля - достаём через as any.
+  const summaryAny = aiSummary as any;
+  const syncStatus: string | undefined = summaryAny?.sync_status;
+  const syncedAt: string | undefined = summaryAny?.synced_at;
+  const hasMarkdownSummary = !!summaryAny?.markdown;
+
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
-      {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
-        {/* <EditableTitle
-          title={meetingTitle}
-          isEditing={isEditingTitle}
-          onStartEditing={onStartEditTitle}
-          onFinishEditing={onFinishEditTitle}
-          onChange={onTitleChange}
-        /> */}
-
-        {/* Button groups - only show when summary exists */}
-        {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-center w-full pt-0 gap-2">
-            {/* Left-aligned: Summary Generator Button Group */}
-            <div className="flex-shrink-0">
-              <SummaryGeneratorButtonGroup
-                modelConfig={modelConfig}
-                setModelConfig={setModelConfig}
-                onSaveModelConfig={onSaveModelConfig}
-                onGenerateSummary={onGenerateSummary}
-                onStopGeneration={onStopGeneration}
-                customPrompt={customPrompt}
-                summaryStatus={summaryStatus}
-                availableTemplates={availableTemplates}
-                selectedTemplate={selectedTemplate}
-                onTemplateSelect={onTemplateSelect}
-                hasTranscripts={transcripts.length > 0}
-                isModelConfigLoading={isModelConfigLoading}
-                onOpenModelSettings={onOpenModelSettings}
+      {/* Title area - все элементы в одной flex-row с единой системой стилей:
+          - Primary CTA: gradient blue→purple (AI - центральное действие)
+          - Secondary buttons: outline gray-300, h-8
+          - Badges: rounded-full pills с iconom
+          Все элементы high=32px (h-8) для единой высоты. */}
+      {transcripts.length > 0 && (
+        <div className="px-4 py-3 border-b border-gray-200">
+          <div className="flex flex-wrap items-center gap-2">
+            <AiTerminalLauncher
+              meetingId={meeting.id}
+              meetingTitle={meetingTitle}
+              onSummarySaved={onAiSummarySaved}
+            />
+            {hasMarkdownSummary && (
+              <SummarySyncBadge
+                meetingId={meeting.id}
+                syncStatus={syncStatus}
+                syncedAt={syncedAt}
               />
-            </div>
-
-            {/* Right-aligned: Summary Updater Button Group */}
-            <div className="flex-shrink-0">
-              <SummaryUpdaterButtonGroup
-                isSaving={isSaving}
-                isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
-                onSave={onSaveAll}
-                onCopy={onCopySummary}
-                onFind={() => {
-                  // TODO: Implement find in summary functionality
-                  console.log('Find in summary clicked');
-                }}
-                onOpenFolder={onOpenFolder}
-                hasSummary={!!aiSummary}
-              />
-            </div>
+            )}
+            {/* Save/Copy - icon-only кнопки h-8 w-8 для компактности */}
+            {aiSummary && !isSummaryLoading && (
+              <TooltipProvider delayDuration={200}>
+                <div className="ml-auto flex items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => {
+                          Analytics.trackButtonClick('save_changes', 'meeting_details');
+                          onSaveAll();
+                        }}
+                        disabled={isSaving}
+                        className={`inline-flex items-center justify-center h-8 w-8 rounded-md border transition-colors disabled:opacity-50 ${
+                          (isTitleDirty || summaryRef.current?.isDirty)
+                            ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        {isSaving ? (
+                          <Loader2 className="w-4 h-4 animate-spin stroke-[1.75]" />
+                        ) : (
+                          <Save className="w-4 h-4 stroke-[1.75]" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{isSaving ? 'Сохраняю...' : 'Сохранить'}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => {
+                          Analytics.trackButtonClick('copy_summary', 'meeting_details');
+                          onCopySummary();
+                        }}
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <Copy className="w-4 h-4 stroke-[1.75]" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Скопировать резюме</TooltipContent>
+                  </Tooltip>
+                </div>
+              </TooltipProvider>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {isSummaryLoading ? (
         <div className="flex flex-col h-full">
-          {/* Show button group during generation */}
-          <div className="flex items-center justify-center pt-8 pb-4">
-            <SummaryGeneratorButtonGroup
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
-              onStopGeneration={onStopGeneration}
-              customPrompt={customPrompt}
-              summaryStatus={summaryStatus}
-              availableTemplates={availableTemplates}
-              selectedTemplate={selectedTemplate}
-              onTemplateSelect={onTemplateSelect}
-              hasTranscripts={transcripts.length > 0}
-              isModelConfigLoading={isModelConfigLoading}
-              onOpenModelSettings={onOpenModelSettings}
-            />
-          </div>
-          {/* Loading spinner */}
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">Generating AI Summary...</p>
+              <p className="text-gray-600">Делаю AI-резюме...</p>
             </div>
           </div>
         </div>
       ) : !aiSummary ? (
         <div className="flex flex-col h-full">
-          {/* Centered Summary Generator Button Group when no summary */}
-          <div className="flex items-center justify-center pt-8 pb-4">
-            <SummaryGeneratorButtonGroup
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
-              onStopGeneration={onStopGeneration}
-              customPrompt={customPrompt}
-              summaryStatus={summaryStatus}
-              availableTemplates={availableTemplates}
-              selectedTemplate={selectedTemplate}
-              onTemplateSelect={onTemplateSelect}
-              hasTranscripts={transcripts.length > 0}
-              isModelConfigLoading={isModelConfigLoading}
-              onOpenModelSettings={onOpenModelSettings}
-            />
+          {/* Empty state - только подсказка, без старых кнопок.
+              AI-резюме делается через центральную кнопку «Сделать AI-резюме» выше. */}
+          <div className="flex flex-col items-center justify-center flex-1 px-8 text-center text-gray-500">
+            <div className="w-16 h-16 mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+              <span className="text-3xl">🤖</span>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Резюме ещё не сделано</h3>
+            <p className="text-sm max-w-md">
+              Нажми «Сделать AI-резюме» сверху - откроется терминал, AI напишет резюме встречи в реальном времени.
+            </p>
           </div>
-          {/* Empty state message */}
-          <EmptyStateSummary
-            onGenerate={() => onGenerateSummary(customPrompt)}
-            hasModel={modelConfig.provider !== null && modelConfig.model !== null}
-            isGenerating={isSummaryLoading}
-          />
         </div>
       ) : transcripts?.length > 0 && (
         <div className="flex-1 overflow-y-auto min-h-0">

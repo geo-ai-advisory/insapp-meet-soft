@@ -1,8 +1,9 @@
 import React from "react";
-import { Info as InfoIcon } from "lucide-react";
+import { CircleHelp } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";
+import { Button } from "./ui/button";
 
 interface InfoProps {
     isCollapsed: boolean;
@@ -12,24 +13,29 @@ const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, re
   return (
     <Dialog aria-describedby={undefined}>
       <DialogTrigger asChild>
-        <button 
-          ref={ref} 
-          className={`flex items-center justify-center mb-2 cursor-pointer border-none transition-colors ${
-            isCollapsed 
-              ? "bg-transparent p-2 hover:bg-gray-100 rounded-lg" 
-              : "w-full px-3 py-1.5 mt-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-200 rounded-lg shadow-sm"
-          }`}
-          title="About Meetily"
-        >
-          <InfoIcon className={`text-gray-600 ${isCollapsed ? "w-5 h-5" : "w-4 h-4"}`} />
-          {!isCollapsed && (
-            <span className="ml-2 text-sm text-gray-700">About</span>
-          )}
-        </button>
+        {isCollapsed ? (
+          <button
+            ref={ref}
+            className="flex items-center justify-center p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
+            title="О приложении"
+          >
+            <CircleHelp className="w-5 h-5 stroke-[1.75]" />
+          </button>
+        ) : (
+          <Button
+            ref={ref}
+            variant="secondary"
+            className="w-full"
+            title="О приложении Insapp-meet"
+          >
+            <CircleHelp />
+            О приложении
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <VisuallyHidden>
-          <DialogTitle>About Meetily</DialogTitle>
+          <DialogTitle>О приложении Insapp-meet</DialogTitle>
         </VisuallyHidden>
         <About />
       </DialogContent>
@@ -37,6 +43,6 @@ const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, re
   );
 });
 
-Info.displayName = "About";
+Info.displayName = "Info";
 
-export default Info; 
+export default Info;

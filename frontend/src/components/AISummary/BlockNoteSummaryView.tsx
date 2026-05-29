@@ -8,6 +8,11 @@ import { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import "@blocknote/shadcn/style.css";
+// ВАЖНО: импорт строго ПОСЛЕ blocknote/shadcn/style.css.
+// Оба файла unlayered с равной specificity - побеждает тот что
+// загружен позже. Так наш H1=1.5em чисто перебивает дефолт 3em
+// без !important и без runtime observers.
+import "./blocknote-heading-override.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
 const Editor = dynamic(() => import('../BlockNoteEditor/Editor'), { ssr: false });
@@ -91,7 +96,10 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       const loadMarkdown = async () => {
         try {
           console.log('📝 Parsing markdown to BlockNote blocks...');
-          const blocks = await editor.tryParseMarkdownToBlocks(data.markdown);
+          // Убираем первый H1 (типа "# Резюме: Meeting..." - Geo не хочет дубль
+          // названия встречи внутри карточки, оно и так в sidebar/URL)
+          const stripped = (data.markdown as string).replace(/^#\s+[^\n]*\n+/, '');
+          const blocks = await editor.tryParseMarkdownToBlocks(stripped);
           editor.replaceBlocks(editor.document, blocks);
           console.log('✅ Markdown parsed successfully');
 
@@ -106,6 +114,43 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       loadMarkdown();
     }
   }, [format, data?.markdown, editor]);
+
+  // Force inline font-size на каждый heading.
+  // ВАЖНО: используем абсолютные rem (НЕ em), т.к. em наследуется от
+  // родительского font-size. BlockNote устанавливает 3em на parent, и тогда
+  // child 1.5em становится 4.5em = по-прежнему огромным.
+  // rem = relative to root (16px), стабильный размер всегда.
+  useEffect(() => {
+    if (!editor) return;
+    const sizeByLevel: Record<string, string> = { "1": "1.5rem", "2": "1.25rem", "3": "1.1rem" };
+    const sizeByTag: Record<string, string> = { H1: "1.5rem", H2: "1.25rem", H3: "1.1rem" };
+
+    const apply = () => {
+      document
+        .querySelectorAll('[data-content-type="heading"], .bn-block-content[data-content-type="heading"]')
+        .forEach((el) => {
+          const level = el.getAttribute('data-level');
+          const size = level ? sizeByLevel[level] : null;
+          if (!size) return;
+          const html = el as HTMLElement;
+          html.style.setProperty('--level', size, 'important');
+          html.style.setProperty('font-size', size, 'important');
+        });
+      document.querySelectorAll('.bn-container h1, .bn-container h2, .bn-container h3').forEach((el) => {
+        const size = sizeByTag[el.tagName];
+        if (!size) return;
+        (el as HTMLElement).style.setProperty('font-size', size, 'important');
+      });
+      document.querySelectorAll('.bn-shadcn h1, .bn-shadcn h2, .bn-shadcn h3').forEach((el) => {
+        const size = sizeByTag[el.tagName];
+        if (!size) return;
+        (el as HTMLElement).style.setProperty('font-size', size, 'important');
+      });
+    };
+    apply();
+    const interval = setInterval(apply, 300);
+    return () => clearInterval(interval);
+  }, [editor, data]);
 
   // Set content loaded flag for blocknote format
   useEffect(() => {
@@ -239,7 +284,31 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     console.log('🎨 Rendering MARKDOWN format (parsed to BlockNote)');
     return (
       <div className="flex flex-col w-full">
-        <div className="w-full">
+        {/* Inline <style> прямо в JSX - точно загружается с компонентом */}
+        <style dangerouslySetInnerHTML={{ __html: `
+          .insapp-bn-scope [data-content-type="heading"][data-level="1"] {
+            --level: 1.5rem !important;
+            font-size: 1.5rem !important;
+          }
+          .insapp-bn-scope [data-content-type="heading"][data-level="2"] {
+            --level: 1.25rem !important;
+            font-size: 1.25rem !important;
+          }
+          .insapp-bn-scope [data-content-type="heading"][data-level="3"] {
+            --level: 1.1rem !important;
+            font-size: 1.1rem !important;
+          }
+          .insapp-bn-scope .bn-block-content[data-content-type="heading"][data-level="1"] {
+            font-size: 1.5rem !important;
+          }
+          .insapp-bn-scope .bn-block-content[data-content-type="heading"][data-level="2"] {
+            font-size: 1.25rem !important;
+          }
+          .insapp-bn-scope h1, .insapp-bn-scope h2, .insapp-bn-scope h3 {
+            font-size: inherit !important;
+          }
+        `}} />
+        <div className="w-full insapp-bn-scope">
           <BlockNoteView
             editor={editor}
             editable={true}

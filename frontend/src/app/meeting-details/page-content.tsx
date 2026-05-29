@@ -32,6 +32,7 @@ export default function PageContent({
   totalCount,
   loadedCount,
   onLoadMore,
+  onAiSummarySaved,
 }: {
   meeting: any;
   summaryData: Summary | null;
@@ -46,6 +47,7 @@ export default function PageContent({
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+  onAiSummarySaved?: (markdown: string) => void;
 }) {
   console.log('📄 PAGE CONTENT: Initializing with data:', {
     meetingId: meeting.id,
@@ -226,6 +228,7 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          onAiSummarySaved={onAiSummarySaved}
         />
       </div>
     </motion.div>

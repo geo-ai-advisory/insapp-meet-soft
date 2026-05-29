@@ -41,7 +41,15 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod insapp_server;
+pub mod insapp_server_commands;
+pub mod mic_watcher;
+pub mod mic_watcher_commands;
 pub mod notifications;
+pub mod pty_terminal;
+pub mod pty_terminal_commands;
+pub mod system_notify;
+pub mod meeting_popup;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
@@ -64,9 +72,11 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
-// Global language preference storage (default to "auto-translate" for automatic translation to English)
+// Global language preference storage.
+// Insapp-meet: дефолт "ru" — встречи на русском, не на английском.
+// Geo жаловался что распознавалось через английский (auto-translate) — меняем.
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
-    std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+    std::sync::LazyLock::new(|| StdMutex::new("ru".to_string()));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -394,7 +404,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // tauri_plugin_updater убран - своих релизов через GitHub пока нет
         .plugin(tauri_plugin_process::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
@@ -402,6 +412,9 @@ pub fn run() {
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(Arc::new(mic_watcher::MicWatcherState::new()))
+        .manage(Arc::new(pty_terminal::PtyManager::new()))
+        .manage(meeting_popup::PopupState::new())
         .setup(|_app| {
             log::info!("Application setup complete");
 
@@ -409,6 +422,9 @@ pub fn run() {
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
             }
+
+            // Запускаем фоновый watcher для авто-попапа «Записать встречу?»
+            mic_watcher::start_watcher(_app.handle().clone());
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
@@ -483,6 +499,18 @@ pub fn run() {
                 database::setup::initialize_database_on_startup(&_app.handle()).await
             })
             .expect("Failed to initialize database");
+
+            // Зачистить мёртвые записи в sync_queue от прошлых версий приложения.
+            // Если запись 3+ раза ловила 4xx — это битый payload/старый ключ, не сетевой.
+            // Без этого старая запись блокирует UI «Не удалось отправить» навсегда.
+            tauri::async_runtime::block_on(async {
+                if let Some(app_state) = _app.handle().try_state::<state::AppState>() {
+                    let deleted = insapp_server::cleanup_dead_queue_entries(app_state.db_manager.pool()).await;
+                    if deleted > 0 {
+                        log::info!("Insapp sync_queue: вычищено {} мёртвых записей при старте", deleted);
+                    }
+                }
+            });
 
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
@@ -630,24 +658,12 @@ pub fn run() {
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,
             api::api_test_custom_openai_connection,
-            // Summary commands
-            summary::api_process_transcript,
-            summary::api_get_summary,
-            summary::api_save_meeting_summary,
-            summary::api_cancel_summary,
-            // Template commands
-            summary::api_list_templates,
-            summary::api_get_template_details,
-            summary::api_validate_template,
-            // Built-in AI commands
-            summary::summary_engine::builtin_ai_list_models,
-            summary::summary_engine::builtin_ai_get_model_info,
-            summary::summary_engine::builtin_ai_download_model,
-            summary::summary_engine::builtin_ai_cancel_download,
-            summary::summary_engine::builtin_ai_delete_model,
-            summary::summary_engine::builtin_ai_is_model_ready,
-            summary::summary_engine::builtin_ai_get_available_summary_model,
-            summary::summary_engine::builtin_ai_get_recommended_model,
+            // Summary read/save - НЕ выпиливать!
+            // api_get_summary читает summary_processes для отображения в окне митинга
+            // (page.tsx fetchMeetingSummary) - сюда AI-терминал тоже пишет результат.
+            // api_save_meeting_summary - для ручного редактирования резюме (BlockNote save).
+            summary::commands::api_get_summary,
+            summary::commands::api_save_meeting_summary,
             openrouter::get_openrouter_models,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,
@@ -716,6 +732,40 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            // Insapp server integration commands
+            insapp_server_commands::insapp_get_status,
+            insapp_server_commands::insapp_save_settings,
+            insapp_server_commands::insapp_get_api_key,
+            insapp_server_commands::insapp_regenerate_api_key,
+            insapp_server_commands::insapp_set_api_key,
+            insapp_server_commands::insapp_register_with_server,
+            insapp_server_commands::insapp_get_identity,
+            insapp_server_commands::insapp_flush_queue,
+            insapp_server_commands::insapp_upload_meeting_by_id,
+            // Mic watcher commands (авто-попап)
+            mic_watcher_commands::mic_watcher_get_settings,
+            mic_watcher_commands::mic_watcher_save_settings,
+            mic_watcher_commands::mic_watcher_mark_ignored,
+            mic_watcher_commands::mic_watcher_set_enabled,
+            // PTY terminal (Phase 2: AI summary через внешний CLI)
+            pty_terminal_commands::pty_spawn,
+            pty_terminal_commands::pty_write,
+            pty_terminal_commands::pty_resize,
+            pty_terminal_commands::pty_kill,
+            pty_terminal_commands::ai_summary_get_settings,
+            pty_terminal_commands::ai_summary_save_settings,
+            pty_terminal_commands::ai_summary_check_cli,
+            pty_terminal_commands::ai_summary_start,
+            pty_terminal_commands::ai_summary_save_result,
+            pty_terminal_commands::ai_summary_read_file,
+            pty_terminal_commands::ai_summary_request_save,
+            pty_terminal_commands::ai_summary_resend_to_server,
+            // Системные уведомления через terminal-notifier sidecar
+            system_notify::system_notify_test,
+            // Всплывающее окно «Записать встречу?»
+            meeting_popup::meeting_popup_request_data,
+            meeting_popup::meeting_popup_record,
+            meeting_popup::meeting_popup_dismiss,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

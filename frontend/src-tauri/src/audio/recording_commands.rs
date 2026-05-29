@@ -213,10 +213,14 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         }
     };
 
-    // Always ensure a meeting name is set so incremental saver initializes
+    // Always ensure a meeting name is set so incremental saver initializes.
+    // Insapp.meet: имя по Москве (Europe/Moscow = UTC+3), независимо от пояса
+    // машины пользователя. Это нужно чтобы на сервере у всех в команде название
+    // встречи совпадало с её "московским" временем — иначе встречи коллег из других
+    // часовых поясов будут с разными названиями.
     let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
-        // Example: Meeting 2025-10-03_08-25-23
-        let now = chrono::Local::now();
+        let msk = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
+        let now = chrono::Utc::now().with_timezone(&msk);
         format!(
             "Meeting {}",
             now.format("%Y-%m-%d_%H-%M-%S")

@@ -118,7 +118,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 }}
                             >
                                 <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
-                                    <SelectValue placeholder="Select provider" />
+                                    <SelectValue placeholder="Выбери провайдера" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
@@ -139,7 +139,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     }}
                                 >
                                     <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
-                                        <SelectValue placeholder="Select model" />
+                                        <SelectValue placeholder="Выбери модель" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {modelOptions[uiProvider].map((model) => (
@@ -176,7 +176,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                     {requiresApiKey && (
                         <div>
                             <Label className="block text-sm font-medium text-gray-700 mb-1">
-                                API Key
+                                API-ключ
                             </Label>
                             <div className="relative mx-1">
                                 <Input
@@ -187,7 +187,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     onChange={(e) => setApiKey(e.target.value)}
                                     disabled={isApiKeyLocked}
                                     onClick={handleInputClick}
-                                    placeholder="Enter your API key"
+                                    placeholder="Введи API-ключ"
                                 />
                                 {isApiKeyLocked && (
                                     <div
@@ -203,7 +203,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
                                         className={`transition-colors duration-200 ${isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''
                                             }`}
-                                        title={isApiKeyLocked ? "Unlock to edit" : "Lock to prevent editing"}
+                                        title={isApiKeyLocked ? "Разблокировать для редактирования" : "Заблокировать от случайных изменений"}
                                     >
                                         {isApiKeyLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
                                     </Button>

@@ -18,12 +18,14 @@ import { TranscriptProvider } from '@/contexts/TranscriptContext'
 import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
+import { IdentityGate } from '@/components/IdentityGate'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
+// SystemNotificationListener убран - уведомления идут из Rust через terminal-notifier sidecar
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 
 
@@ -68,8 +70,21 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Если открыт popup-маршрут /meeting-popup - НЕ рендерим главный layout
+  // (sidebar, providers, onboarding). Только чистая страница попапа.
+  const [isPopupRoute, setIsPopupRoute] = useState(false);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      setIsPopupRoute(path.startsWith('/meeting-popup'));
+    }
+  }, []);
+
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
+  // IdentityGate: показываем экран ввода ФИО если пользователь ещё не
+  // зарегистрирован на сервере. null = ещё проверяем, true/false = решено.
+  const [needsIdentity, setNeedsIdentity] = useState<boolean | null>(null)
 
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false)
@@ -98,6 +113,20 @@ export default function RootLayout({
       })
   }, [])
 
+  // Проверяем зарегистрирован ли пользователь на корпоративном сервере.
+  // Если нет - после онбординга покажем IdentityGate (экран ввода ФИО).
+  useEffect(() => {
+    invoke<{ is_registered: boolean }>('insapp_get_identity')
+      .then((identity) => {
+        setNeedsIdentity(!identity.is_registered)
+      })
+      .catch((error) => {
+        console.error('[Layout] Failed to check identity:', error)
+        // Если не смогли проверить - не блокируем, считаем что не нужно
+        setNeedsIdentity(false)
+      })
+  }, [])
+
   // Disable context menu in production
   useEffect(() => {
     if (process.env.NODE_ENV === 'production') {
@@ -116,14 +145,41 @@ export default function RootLayout({
           description: "You need to finish onboarding before you can start recording."
         });
       } else {
-        // If in main app, forward to useRecordingStart via window event
         console.log('[Layout] Forwarding to start-recording-from-sidebar');
         window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
       }
     });
 
+    // Listen for popup "Да, записать" — стартануть запись из главного окна.
+    // meeting_popup_record (Rust) шлёт этот event в main window после того
+    // как пользователь нажал «Да, записать» в попапе.
+    //
+    // ВАЖНО: useRecordingStart перерегистрирует свой listener при изменении
+    // selectedDevices/isRecording. Если первый dispatch попал в момент когда
+    // listener ещё не подписан — событие теряется. Поэтому делаем retry × 3
+    // с растущим интервалом: первое срабатывает почти сразу, два запасных
+    // ловят случай когда useRecordingStart перерегистрируется.
+    // useRecordingStart внутри сам проверяет `isRecording || isAutoStarting`
+    // и игнорирует повторные срабатывания — duplicate dispatch безопасен.
+    const unlistenPopup = listen<string>('start-recording-from-popup', (event) => {
+      console.log('[Layout] Received start-recording-from-popup, bundle:', event.payload);
+
+      if (showOnboarding) {
+        toast.error("Заверши установку приложения чтобы начать запись");
+        return;
+      }
+      const fireDispatch = () => {
+        console.log('[Layout] Dispatching start-recording-from-sidebar from popup');
+        window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+      };
+      setTimeout(fireDispatch, 250);
+      setTimeout(fireDispatch, 900);
+      setTimeout(fireDispatch, 1800);
+    });
+
     return () => {
       unlisten.then(fn => fn());
+      unlistenPopup.then(fn => fn());
     };
   }, [showOnboarding]);
 
@@ -230,6 +286,17 @@ export default function RootLayout({
     window.location.reload()
   }
 
+  // Popup-окно: рендерим только содержимое без layout/sidebar/providers
+  if (isPopupRoute) {
+    return (
+      <html lang="ru">
+        <body className={`${sourceSans3.variable} font-sans antialiased`}>
+          {children}
+        </body>
+      </html>
+    );
+  }
+
   return (
     <html lang="en">
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
@@ -247,9 +314,14 @@ export default function RootLayout({
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
 
-                              {/* Show onboarding or main app */}
+                              {/* Порядок gate'ов:
+                                  1. Онбординг (модели, разрешения) - если не пройден
+                                  2. IdentityGate (ФИО) - если не зарегистрирован на сервере
+                                  3. Главное приложение */}
                               {showOnboarding ? (
                                 <OnboardingFlow onComplete={handleOnboardingComplete} />
+                              ) : needsIdentity === true ? (
+                                <IdentityGate onDone={() => setNeedsIdentity(false)} />
                               ) : (
                                 <div className="flex">
                                   <Sidebar />

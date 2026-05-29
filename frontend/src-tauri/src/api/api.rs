@@ -928,12 +928,15 @@ pub async fn api_save_meeting_title<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
     folder_path: Option<String>,
     auth_token: Option<String>,
+    // Если true - не отправлять на Insapp сервер при сохранении этой встречи
+    // (для override галочки «Отправить в облако Insapp» в UI).
+    skip_server_upload: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
         "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
@@ -986,10 +989,42 @@ pub async fn api_save_transcript<R: Runtime>(
                 "Successfully saved transcript and created meeting with id: {}",
                 meeting_id
             );
+
+            // Insapp server: пробуем сразу отправить на корпоративный сервер.
+            // Если sk-флаг — пропускаем отправку (галочка снята).
+            // Если сервер недоступен — встреча уходит в локальную очередь и отправится позже.
+            let sync_status = if skip_server_upload.unwrap_or(false) {
+                log_info!(
+                    "Insapp server upload SKIPPED для встречи {} (галочка в UI снята)",
+                    meeting_id
+                );
+                crate::insapp_server::SyncStatus::Disabled
+            } else {
+                crate::insapp_server_commands::try_upload_meeting(
+                    &app,
+                    state.inner(),
+                    &meeting_id,
+                    &meeting_title,
+                    &transcripts_to_save,
+                )
+                .await
+            };
+            let sync_label = match sync_status {
+                crate::insapp_server::SyncStatus::Sent => "sent",
+                crate::insapp_server::SyncStatus::Pending => "pending",
+                crate::insapp_server::SyncStatus::Failed => "failed",
+                crate::insapp_server::SyncStatus::Disabled => "disabled",
+            };
+            log_info!(
+                "Insapp server upload status for meeting {}: {}",
+                meeting_id, sync_label
+            );
+
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Transcript saved successfully",
-                "meeting_id": meeting_id
+                "meeting_id": meeting_id,
+                "insapp_sync": sync_label,
             }))
         }
         Err(e) => {

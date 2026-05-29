@@ -48,10 +48,10 @@ export function TranscriptButtonGroup({
             onCopyTranscript();
           }}
           disabled={transcriptCount === 0}
-          title={transcriptCount === 0 ? 'No transcript available' : 'Copy Transcript'}
+          title={transcriptCount === 0 ? 'Транскрипт пуст' : 'Скопировать транскрипт'}
         >
           <Copy />
-          <span className="hidden lg:inline">Copy</span>
+          <span className="hidden lg:inline">Скопировать</span>
         </Button>
 
         <Button
@@ -62,27 +62,15 @@ export function TranscriptButtonGroup({
             Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
             onOpenMeetingFolder();
           }}
-          title="Open Recording Folder"
+          title="Открыть папку с записью"
         >
           <FolderOpen className="xl:mr-2" size={18} />
-          <span className="hidden lg:inline">Recording</span>
+          <span className="hidden lg:inline">Папка</span>
         </Button>
 
-        {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
-            onClick={() => {
-              Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
-              setShowRetranscribeDialog(true);
-            }}
-            title="Retranscribe to enhance your recorded audio"
-          >
-            <RefreshCw className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline">Enhance</span>
-          </Button>
-        )}
+        {/* Кнопка «Перераспознать» (Enhance) убрана - она не про AI-резюме,
+            а про повторный прогон Whisper с другими параметрами. Geo сказал
+            она путает. Доступна через Settings → Beta если кому понадобится. */}
       </ButtonGroup>
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (

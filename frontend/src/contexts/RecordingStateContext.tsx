@@ -20,6 +20,7 @@ export enum RecordingStatus {
   STOPPING = 'stopping',                  // Stop initiated, waiting for backend
   PROCESSING_TRANSCRIPTS = 'processing',  // Transcription completion wait
   SAVING = 'saving',                      // Saving to database
+  UPLOADING_TO_SERVER = 'uploading',      // Отправка на сервер Insapp
   COMPLETED = 'completed',                // Successfully saved
   ERROR = 'error'                         // Error occurred
 }

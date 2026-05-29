@@ -10,22 +10,22 @@ export function WelcomeStep() {
   const features = [
     {
       icon: Lock,
-      title: 'Your data never leaves your device',
+      title: 'Все данные остаются на твоём компьютере',
     },
     {
       icon: Sparkles,
-      title: 'Intelligent summaries & insights',
+      title: 'Расшифровка и резюме встреч',
     },
     {
       icon: Cpu,
-      title: 'Works offline, no cloud required',
+      title: 'Работает офлайн, без облака',
     },
   ];
 
   return (
     <OnboardingContainer
-      title="Welcome to Meetily"
-      description="Record. Transcribe. Summarize. All on your device."
+      title="Добро пожаловать в Insapp-meet"
+      description="Запись, расшифровка и резюме встреч на твоём устройстве"
       step={1}
       hideProgress={true}
     >
@@ -56,9 +56,9 @@ export function WelcomeStep() {
             onClick={goNext}
             className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white"
           >
-            Get Started
+            Начать
           </Button>
-          <p className="text-xs text-center text-gray-500">Takes less than 3 minutes</p>
+          <p className="text-xs text-center text-gray-500">Займёт меньше 3 минут</p>
         </div>
       </div>
     </OnboardingContainer>

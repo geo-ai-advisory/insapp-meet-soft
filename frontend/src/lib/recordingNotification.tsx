@@ -14,16 +14,18 @@ export async function showRecordingNotification(): Promise<void> {
   try {
     const { Store } = await import('@tauri-apps/plugin-store');
     const store = await Store.load('preferences.json');
-    const showNotification = await store.get<boolean>('show_recording_notification') ?? true;
+    // По умолчанию compliance-уведомление выключено - Geo попросил его убрать.
+    // Можно включить обратно через Настройки → Запись → «Уведомление о старте записи».
+    const showNotification = await store.get<boolean>('show_recording_notification') ?? false;
 
     if (showNotification) {
       let dontShowAgain = false;
 
-      const toastId = toast.info('🔴 Recording Started', {
+      const toastId = toast.info('🔴 Запись началась', {
         description: (
           <div className="space-y-3 min-w-[280px]">
             <p className="text-sm font-medium text-gray-900">
-              Inform all participants this meeting is being recorded.
+              Не забудь предупредить участников, что встреча записывается.
             </p>
             <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-blue-100 p-2 rounded transition-colors">
               <input
@@ -33,7 +35,7 @@ export async function showRecordingNotification(): Promise<void> {
                 }}
                 className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
               />
-              <span className="select-none text-gray-700">Don't show this again</span>
+              <span className="select-none text-gray-700">Больше не показывать</span>
             </label>
             <button
               onClick={async () => {
@@ -48,7 +50,7 @@ export async function showRecordingNotification(): Promise<void> {
               }}
               className="w-full px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 transition-colors font-medium"
             >
-              I've Notified Participants
+              Я предупредил участников
             </button>
           </div>
         ),

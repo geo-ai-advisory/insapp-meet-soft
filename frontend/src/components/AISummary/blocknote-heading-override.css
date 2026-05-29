@@ -1,0 +1,52 @@
+/*
+ * BlockNote heading size override.
+ *
+ * Default BlockNote H1=3em, H2=2em (слишком крупно). Делаем H1=1.5rem.
+ *
+ * !important здесь оправдан: blocknote core CSS использует селектор со
+ * specificity (0,7,0):
+ *   .bn-block-outer:not([data-prev-type])>.bn-block>div[data-type=modification]>...>.bn-block-content[data-content-type=heading]
+ * Match всю цепочку в нашем CSS было бы fragile (любое изменение в blocknote
+ * сломает override). !important - канонический способ override 3rd party
+ * библиотечного CSS точечно для конкретных свойств.
+ */
+/*
+ * Реальная DOM структура BlockNote heading (выяснено через debug overlay):
+ *   <div class="bn-block-content" data-content-type="heading">  (без data-level)
+ *     <h1>...</h1>  (real heading tag with default font-size from blocknote CSS)
+ *   </div>
+ *
+ * BlockNote ставит font-size 3em на h1 тег НАПРЯМУЮ через chained complex selector.
+ * Override должен попасть в h1/h2/h3 теги без зависимости от data-level.
+ */
+
+/* Override через h1/h2/h3 теги в bn-shadcn (theme wrapper) */
+.bn-shadcn h1 {
+  font-size: 1.5rem !important;
+  line-height: 1.3 !important;
+}
+.bn-shadcn h2 {
+  font-size: 1.25rem !important;
+  line-height: 1.4 !important;
+}
+.bn-shadcn h3 {
+  font-size: 1.1rem !important;
+  line-height: 1.4 !important;
+}
+
+/* Также на родительский div - на случай если heading рендерится не через h-tag */
+[data-content-type="heading"][data-level="1"],
+.bn-block-content[data-content-type="heading"][data-level="1"] {
+  --level: 1.5rem !important;
+  font-size: 1.5rem !important;
+}
+[data-content-type="heading"][data-level="2"],
+.bn-block-content[data-content-type="heading"][data-level="2"] {
+  --level: 1.25rem !important;
+  font-size: 1.25rem !important;
+}
+[data-content-type="heading"][data-level="3"],
+.bn-block-content[data-content-type="heading"][data-level="3"] {
+  --level: 1.1rem !important;
+  font-size: 1.1rem !important;
+}

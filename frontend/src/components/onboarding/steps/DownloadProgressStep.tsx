@@ -45,11 +45,13 @@ export function DownloadProgressStep() {
     speedMbps: 0,
   });
 
+  // Saммаризатор Meetily выпилен в Phase 2 - модель саммари не качаем.
+  // Помечаем как completed сразу, чтобы онбординг не блокировался.
   const [gemmaState, setGemmaState] = useState<DownloadState>({
-    status: summaryModelDownloaded ? 'completed' : 'waiting',
-    progress: summaryModelDownloaded ? 100 : 0,
+    status: 'completed',
+    progress: 100,
     downloadedMb: 0,
-    totalMb: 806, // 1b model size
+    totalMb: 0,
     speedMbps: 0,
   });
 
@@ -371,7 +373,7 @@ export function DownloadProgressStep() {
         </div>
         <div>
           {state.status === 'waiting' && (
-            <span className="text-sm text-gray-500">Waiting...</span>
+            <span className="text-sm text-gray-500">Жду...</span>
           )}
           {state.status === 'downloading' && (
             <Loader2 className="w-5 h-5 text-gray-700 animate-spin" />
@@ -382,7 +384,7 @@ export function DownloadProgressStep() {
             </div>
           )}
           {state.status === 'error' && (
-            <span className="text-sm text-red-500">Failed</span>
+            <span className="text-sm text-red-500">Ошибка</span>
           )}
         </div>
       </div>
@@ -416,7 +418,7 @@ export function DownloadProgressStep() {
 
       {state.status === 'error' && state.error && (
         <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-600 font-medium">Download Error</p>
+          <p className="text-sm text-red-600 font-medium">Ошибка скачивания</p>
           <p className="text-xs text-red-500 mt-1">{state.error}</p>
           {(title === 'Transcription Engine' || title === 'Summary Engine') && (
             <button
@@ -427,7 +429,7 @@ export function DownloadProgressStep() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Try Again
+              Попробовать снова
             </button>
           )}
         </div>
@@ -437,8 +439,8 @@ export function DownloadProgressStep() {
 
   return (
     <OnboardingContainer
-      title="Getting things ready"
-      description="You can start using Meetily after downloading the Transcription Engine."
+      title="Готовим всё к работе"
+      description="Insapp-meet можно использовать сразу после скачивания модели распознавания."
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
@@ -446,18 +448,13 @@ export function DownloadProgressStep() {
         {/* Download Cards */}
         <div className="w-full max-w-lg space-y-4">
           {renderDownloadCard(
-            'Transcription Engine',
+            'Модель распознавания речи',
             <Mic className="w-5 h-5 text-gray-600" />,
             parakeetState,
             '~670 MB'
           )}
 
-          {renderDownloadCard(
-            'Summary Engine',
-            <Sparkles className="w-5 h-5 text-gray-600" />,
-            gemmaState,
-            recommendedModel === 'gemma3:4b' ? '~2.5 GB' : '~806 MB'
-          )}
+          {/* Summary Engine блок выпилен в Phase 2 - используем внешний CLI (Claude/Codex). */}
         </div>
 
         {/* Info Message - Only show when Parakeet is downloaded */}
@@ -473,9 +470,9 @@ export function DownloadProgressStep() {
               <div className="flex items-start gap-3">
                 <Download className="w-5 h-5 text-gray-600 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">You can continue while this finishes</p>
+                  <p className="font-medium">Можно идти дальше - скачается в фоне</p>
                   <p className="text-gray-700 mt-1">
-                    Download will continue in the background.
+                    Загрузка продолжится в фоновом режиме.
                   </p>
                 </div>
               </div>

@@ -21,6 +21,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { UploadOptInToggle } from '@/components/UploadOptInToggle';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -124,12 +125,12 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
-        toast.success('Meeting recovered successfully!', {
+        toast.success('Встреча восстановлена!', {
           description: result.audioRecoveryStatus?.status === 'success'
-            ? 'Transcripts and audio recovered'
-            : 'Transcripts recovered (no audio available)',
+            ? 'Транскрипт и аудио восстановлены'
+            : 'Транскрипт восстановлен (без аудио)',
           action: result.meetingId ? {
-            label: 'View Meeting',
+            label: 'Открыть встречу',
             onClick: () => {
               router.push(`/meeting-details?id=${result.meetingId}`);
             }
@@ -153,8 +154,8 @@ export default function Home() {
         }
       }
     } catch (error) {
-      toast.error('Failed to recover meeting', {
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
+      toast.error('Не удалось восстановить встречу', {
+        description: error instanceof Error ? error.message : 'Неизвестная ошибка',
       });
       throw error;
     }
@@ -230,7 +231,7 @@ export default function Home() {
                   marginLeft: sidebarCollapsed ? '4rem' : '16rem'
                 }}
               >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
+                <div className="w-2/3 max-w-[750px] flex flex-col items-center gap-2">
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
                       isRecording={recordingState.isRecording}
@@ -248,15 +249,19 @@ export default function Home() {
                       meetingName={meetingTitle}
                     />
                   </div>
+                  {/* Чекбокс «Отправить в облако Insapp» - под кнопкой Стоп,
+                      видим только когда идёт запись */}
+                  <UploadOptInToggle visible={recordingState.isRecording} />
                 </div>
               </div>
             </div>
           )}
 
-        {/* Status Overlays - Processing and Saving */}
+        {/* Status Overlays - Processing, Saving, Uploading */}
         <StatusOverlays
           isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording}
           isSaving={status === RecordingStatus.SAVING}
+          isUploading={status === RecordingStatus.UPLOADING_TO_SERVER}
           sidebarCollapsed={sidebarCollapsed}
         />
       </div>

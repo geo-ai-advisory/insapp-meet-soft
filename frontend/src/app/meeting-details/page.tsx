@@ -1,11 +1,12 @@
 "use client"
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
 import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
@@ -310,6 +311,22 @@ function MeetingDetailsContent() {
     };
 
     loadData();
+
+    // Слушаем событие "AI-резюме сохранено" из backend (после ai_summary_save_result).
+    // Без этого после клика "Сохранить как резюме" UI оставался с надписью
+    // "Резюме ещё не сделано" - сохранённое резюме не подтягивалось автоматически.
+    let unlisten: UnlistenFn | null = null;
+    listen<string>('ai-summary-saved', (event) => {
+      // event.payload = meeting_id для которого сохранили
+      if (event.payload === meetingId) {
+        console.log('[page] ai-summary-saved для текущей встречи — обновляю резюме');
+        fetchMeetingSummary();
+      }
+    }).then((fn) => { unlisten = fn; });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, [meetingId]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
@@ -334,6 +351,19 @@ function MeetingDetailsContent() {
 
     checkAutoGen();
   }, [meetingDetails, meetingSummary, hasCheckedAutoGen, setupAutoGeneration]);
+
+  // Прямой обработчик когда TerminalPanel сохранил AI-резюме.
+  // Сразу обновляем UI - не дожидаемся event'а ai-summary-saved.
+  // ВАЖНО: useCallback ДО early returns ниже - иначе нарушение Rules of Hooks
+  // (количество вызванных хуков должно быть одинаковым при каждом рендере).
+  const handleAiSummarySaved = useCallback((markdown: string) => {
+    console.log('[page] handleAiSummarySaved called, markdown len:', markdown.length);
+    setMeetingSummary({
+      markdown,
+      format: 'markdown',
+      source: 'ai_terminal',
+    } as any);
+  }, []);
 
   if (error) {
     return (
@@ -364,13 +394,11 @@ function MeetingDetailsContent() {
     shouldAutoGenerate={shouldAutoGenerate}
     onAutoGenerateComplete={() => setShouldAutoGenerate(false)}
     onMeetingUpdated={async () => {
-      // Refetch meeting details to get updated title from backend
       await fetchMeetingDetails();
-      // Refetch meetings list to update sidebar
       await refetchMeetings();
     }}
     onRefetchTranscripts={refetch}
-    // Pagination props for efficient transcript loading
+    onAiSummarySaved={handleAiSummarySaved}
     segments={segments}
     hasMore={hasMore}
     isLoadingMore={isLoadingMore}

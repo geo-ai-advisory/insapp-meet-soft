@@ -211,4 +211,39 @@
   [data-node-type] {
     overflow: visible !important;
   }
+
+}
+
+/* Heading override живёт в components/AISummary/blocknote-heading-override.css
+   и импортируется СРАЗУ ПОСЛЕ blocknote core CSS - так без !important
+   и без runtime observers всё корректно по cascade. */
+
+/* GLOBAL: все lucide-иконки stroke-width=1.75 для премиум-вида.
+   Lucide React добавляет class="lucide lucide-<name>" на каждую svg.
+   Override применяется ко ВСЕМ иконкам в приложении одной строкой -
+   не нужно подгонять каждый компонент. */
+svg.lucide {
+  stroke-width: 1.75;
+}
+
+/* GLOBAL: типографика заголовков для основного приложения
+   (НЕ для BlockNote-редактора резюме - тот живёт по своим правилам).
+   Tailwind preflight обнуляет h1-h6, восстанавливаем разумные размеры. */
+.app-typography h1,
+main h1 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 600;
+}
+.app-typography h2,
+main h2 {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+}
+.app-typography h3,
+main h3 {
+  font-size: 1.125rem;
+  line-height: 1.5rem;
+  font-weight: 600;
 }

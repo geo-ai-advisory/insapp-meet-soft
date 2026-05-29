@@ -140,9 +140,17 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('primaryLanguage');
-      return saved || 'auto';
+      // Insapp-meet: дефолт 'ru'. Также одноразовая миграция со старых
+      // значений 'auto' / 'auto-translate' (которые приводили к английскому
+      // распознаванию) → 'ru'. Geo может явно выбрать другой язык в Settings,
+      // и тогда это значение сохранится в localStorage.
+      if (!saved || saved === 'auto' || saved === 'auto-translate') {
+        localStorage.setItem('primaryLanguage', 'ru');
+        return 'ru';
+      }
+      return saved;
     }
-    return 'auto';
+    return 'ru';
   });
 
   // UI preferences state

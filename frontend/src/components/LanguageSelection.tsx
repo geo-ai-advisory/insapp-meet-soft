@@ -155,12 +155,12 @@ export function LanguageSelection({
 
       // Show success toast
       const languageName = selectedLang?.name || languageCode;
-      toast.success("Language preference saved", {
-        description: `Transcription language set to ${languageName}`
+      toast.success("Язык распознавания сохранён", {
+        description: `Установлен: ${languageName}`
       });
     } catch (error) {
       console.error('Failed to save language preference:', error);
-      toast.error("Failed to save language preference", {
+      toast.error("Не удалось сохранить язык", {
         description: error instanceof Error ? error.message : String(error)
       });
     } finally {

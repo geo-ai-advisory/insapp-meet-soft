@@ -167,6 +167,10 @@ core-graphics = "0.23"
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
+# AI summary terminal (Phase 2): pty для встроенного терминала с claude/codex CLI
+portable-pty = "0.9"
+# CoreAudio для детекции активации микрофона (mic_watcher)
+coreaudio-sys = "0.2"
 
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips

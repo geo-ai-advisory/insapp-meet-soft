@@ -1,8 +1,8 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily",
+    "productName": "Insapp-meet",
     "version": "0.3.0",
-    "identifier": "com.meetily.ai",
+    "identifier": "tech.insap.meet",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",
@@ -12,13 +12,14 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "Insapp-meet",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,
                 "fullscreen": false,
                 "theme": "Light",
-                "decorations": true
+                "decorations": true,
+                "devtools": true
             }
         ],
         "macOSPrivateApi": true,
@@ -27,7 +28,7 @@
                 "default-src": "'self'",
                 "style-src": "'self' 'unsafe-inline'",
                 "img-src": "'self' asset: https://asset.localhost data:",
-                "connect-src": "'self' http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
+                "connect-src": "'self' http://localhost:8080 http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
             },
             "assetProtocol": {
                 "enable": true,
@@ -40,7 +41,8 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "meeting-popup"
                     ],
                     "permissions": [
                         "fs:default",
@@ -55,11 +57,17 @@
                         "core:path:default",
                         "core:event:default",
                         "core:window:default",
+                        "core:webview:default",
                         "core:app:default",
                         "core:resources:default",
                         "core:menu:default",
                         "core:tray:default",
                         "core:window:allow-set-title",
+                        "core:window:allow-close",
+                        "core:window:allow-set-focus",
+                        "core:window:allow-show",
+                        "core:window:allow-hide",
+                        "core:webview:allow-webview-close",
                         "store:default",
                         "notification:default",
                         "notification:allow-is-permission-granted",
@@ -88,17 +96,17 @@
             "app",
             "dmg"
         ],
-        "createUpdaterArtifacts": true,
+        "createUpdaterArtifacts": false,
         "icon": [
             "icons/icon.png",
             "icons/app_icon.icns",
             "icons/app_icon.ico"
         ],
         "resources": [
-            "templates/*.json"
+            "templates/*.json",
+            "resources/Insapp-notifier.app"
         ],
         "externalBin": [
-            "binaries/llama-helper",
             "binaries/ffmpeg"
         ],
         "macOS": {
@@ -110,12 +118,5 @@
             "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
         }
     },
-    "plugins": {
-        "updater": {
-            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTYzMUQ3ODc5N0M4MkEKUldRcXlKZUgxekdtN09DRkVWSHNpZlJseEVOUmpNd1dDSTNaLzZ3MXJGTnY3WW1pdnlOYjBpbkIK",
-            "endpoints": [
-                "https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest/download/latest.json"
-            ]
-        }
-    }
+    "plugins": {}
 }

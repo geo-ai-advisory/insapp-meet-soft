@@ -41,10 +41,19 @@ export class StorageService {
     transcripts: Transcript[],
     folderPath: string | null
   ): Promise<SaveMeetingResponse> {
+    // Читаем галочку «Отправить в облако Insapp» из sessionStorage
+    // (UploadOptInToggle сохраняет туда состояние)
+    let skipServerUpload = false;
+    if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem('insapp_upload_to_cloud');
+      skipServerUpload = stored === 'false';
+    }
+
     return invoke<SaveMeetingResponse>('api_save_transcript', {
       meetingTitle,
       transcripts,
       folderPath,
+      skipServerUpload,
     });
   }
 

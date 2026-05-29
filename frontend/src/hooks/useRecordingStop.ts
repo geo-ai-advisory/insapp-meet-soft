@@ -229,16 +229,24 @@ export function useRecordingStop(
       // Save to SQLite
       // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
       // This ensures user sees all transcripts streaming in before database save
-      if (isCallApi && transcriptionComplete == true) {
+      //
+      // FIX (28.05): раньше условие было только `transcriptionComplete == true`.
+      // Но событие 'transcription-complete' в текущей кодовой базе никто не эмитит
+      // (backend шлёт 'transcription-queue-complete'). В итоге если polling
+      // не успевает сработать (last_activity < 8s) — встреча сохранялась с 0 сегментов.
+      // Теперь: если в буфере есть хоть один сегмент — сохраняем встречу.
+      const freshTranscripts = [...transcriptsRef.current];
+      const hasTranscripts = freshTranscripts.length > 0;
+      if (isCallApi && (transcriptionComplete || hasTranscripts)) {
 
-        setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
-
-        // Get fresh transcript state (ALL transcripts including late ones)
-        const freshTranscripts = [...transcriptsRef.current];
+        setStatus(RecordingStatus.SAVING, 'Сохраняю встречу...');
 
         // Get folder_path and meeting_name from recording-stopped event
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
         const savedMeetingName = sessionStorage.getItem('last_recording_meeting_name');
+
+        // Если галочка «Отправить в облако Insapp» отмечена - показываем стадию отправки
+        const willUpload = sessionStorage.getItem('insapp_upload_to_cloud') !== 'false';
 
         console.log('💾 Saving COMPLETE transcripts to database...', {
           transcript_count: freshTranscripts.length,
@@ -249,11 +257,23 @@ export function useRecordingStop(
         });
 
         try {
+          if (willUpload) {
+            setStatus(RecordingStatus.UPLOADING_TO_SERVER, 'Отправляю на сервер Insapp...');
+          }
+
           const responseData = await storageService.saveMeeting(
             savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
             freshTranscripts,
             folderPath
           );
+
+          // Сохраним sync статус в sessionStorage чтобы AI-резюме мог показать что транскрипт уже на сервере
+          if ((responseData as any).insapp_sync) {
+            sessionStorage.setItem(
+              `insapp_sync_${responseData.meeting_id}`,
+              (responseData as any).insapp_sync,
+            );
+          }
 
           const meetingId = responseData.meeting_id;
           if (!meetingId) {
