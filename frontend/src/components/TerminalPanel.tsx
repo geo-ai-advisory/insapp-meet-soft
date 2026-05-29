@@ -72,6 +72,23 @@ export function TerminalPanel({
   >("idle");
   const [isSaving, setIsSaving] = useState(false);
   const [savedMarkdown, setSavedMarkdown] = useState<string | null>(null);
+  // Готов ли файл резюме (AI его записал) - тогда Save активен даже если процесс завершился
+  const [fileReady, setFileReady] = useState(false);
+
+  // Периодически проверяем появился ли файл резюме (AI пишет его в процессе).
+  // Как только появился - активируем кнопку Save независимо от состояния сессии.
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const md = await invoke<string | null>("ai_summary_read_file", { meetingId });
+        if (alive && md && md.trim().length > 30) setFileReady(true);
+      } catch (_) { /* нет файла */ }
+    };
+    check();
+    const interval = setInterval(check, 2000);
+    return () => { alive = false; clearInterval(interval); };
+  }, [meetingId]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -200,30 +217,44 @@ export function TerminalPanel({
   }, [meetingId]);
 
   /**
-   * Save flow:
-   * 1. Backend через pty шлёт AI команду "запиши финальную версию в файл"
-   * 2. AI выполняет tool Write, создаёт файл
-   * 3. Backend polling файла → возвращает markdown
-   * 4. Frontend → ai_summary_save_result → БД + сервер
-   * 5. onSummarySaved(markdown) → page.tsx обновляет окно митинга
+   * Save flow (надёжный, без гонки с занятым AI):
+   * 1. Сначала читаем УЖЕ записанный AI файл (ai_summary_read_file).
+   *    AI пишет файл в процессе работы - в большинстве случаев он уже на диске.
+   * 2. Если файла ещё нет - просим AI записать (ai_summary_request_save) и ждём.
+   * 3. Frontend → ai_summary_save_result → БД + сервер.
+   * 4. onSummarySaved(markdown) → page.tsx обновляет окно митинга.
+   *
+   * Раньше Save ВСЕГДА слал AI новую команду + polling 60 сек. Если AI был занят
+   * (думал над правкой пользователя дольше) - polling истекал, сохранение падало,
+   * хотя файл уже был записан. Теперь читаем готовый файл напрямую.
    */
   const handleSaveAsSummary = async () => {
-    if (!sessionIdRef.current || !sessionActive) {
-      toast.error("AI-сессия не активна. Перезапусти процесс.");
-      return;
-    }
     setIsSaving(true);
     try {
-      // Шаг 1-3: бэкенд просит AI записать файл и возвращает содержимое
-      toast.loading("Прошу AI сохранить финальную версию в файл...", {
-        id: "save-summary",
-      });
-      const markdown = await invoke<string>("ai_summary_request_save", {
-        sessionId: sessionIdRef.current,
-        meetingId,
-      });
+      // Шаг 1: пробуем прочитать уже записанный файл
+      let markdown = "";
+      try {
+        const existing = await invoke<string | null>("ai_summary_read_file", { meetingId });
+        if (existing && existing.trim().length > 30) {
+          markdown = existing;
+        }
+      } catch (_) { /* файла нет - попросим AI ниже */ }
 
-      // Шаг 4: пишем в БД и отправляем на сервер
+      // Шаг 2: если файла нет - просим AI записать (нужна активная сессия)
+      if (!markdown) {
+        if (!sessionIdRef.current || !sessionActive) {
+          toast.error("Резюме ещё не готово. Дождись пока AI закончит, потом сохрани.");
+          setIsSaving(false);
+          return;
+        }
+        toast.loading("Прошу AI записать финальную версию...", { id: "save-summary" });
+        markdown = await invoke<string>("ai_summary_request_save", {
+          sessionId: sessionIdRef.current,
+          meetingId,
+        });
+      }
+
+      // Шаг 3: пишем в БД и отправляем на сервер
       const result = await invoke<{ saved: boolean; sync_status: string }>(
         "ai_summary_save_result",
         {
@@ -408,10 +439,10 @@ export function TerminalPanel({
           variant="primary"
           size="sm"
           onClick={handleSaveAsSummary}
-          disabled={isStarting || !sessionActive || isSaving}
+          disabled={isSaving || (!sessionActive && !fileReady)}
         >
           {isSaving ? <Loader2 className="animate-spin" /> : <Save />}
-          {isSaving ? "AI пишет файл..." : "Сохранить как резюме"}
+          {isSaving ? "Сохраняю..." : "Сохранить как резюме"}
         </Button>
 
         <Button
