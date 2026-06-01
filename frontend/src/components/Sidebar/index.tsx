@@ -18,6 +18,8 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { UserProfileButton } from '@/components/UserProfileButton';
+import { triggerUpdateCheck } from '@/components/UpdateChecker';
+import { DownloadCloud } from 'lucide-react';
 
 import {
   Dialog,
@@ -545,6 +547,22 @@ const Sidebar: React.FC = () => {
 
           <Info isCollapsed={isCollapsed} />
 
+          {/* Проверить обновление вручную (авто-проверка идёт при запуске) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => triggerUpdateCheck()}
+                className="p-2 rounded-lg transition-colors duration-150 hover:bg-gray-100 text-gray-600"
+                aria-label="Проверить обновление"
+              >
+                <DownloadCloud className="w-5 h-5 stroke-[1.75]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Проверить обновление</p>
+            </TooltipContent>
+          </Tooltip>
+
           {/* Профиль пользователя - имя залогиненного + выход/вход */}
           <UserProfileButton collapsed={true} />
         </div>
@@ -814,6 +832,16 @@ const Sidebar: React.FC = () => {
             </Button>
 
             <Info isCollapsed={isCollapsed} />
+
+            {/* Проверить обновление вручную (авто-проверка идёт при запуске) */}
+            <Button
+              variant="secondary"
+              onClick={() => triggerUpdateCheck()}
+              className="w-full"
+            >
+              <DownloadCloud />
+              Проверить обновление
+            </Button>
 
             {/* Профиль пользователя - имя залогиненного + выход/вход */}
             <div className="w-full pt-1 border-t border-gray-100 mt-1">

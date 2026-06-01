@@ -19,6 +19,7 @@ import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
 import { IdentityGate } from '@/components/IdentityGate'
+import { UpdateChecker } from '@/components/UpdateChecker'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
@@ -313,6 +314,9 @@ export default function RootLayout({
                             <ImportDialogProvider onOpen={handleOpenImportDialog}>
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
+
+                              {/* Авто-проверка обновлений при запуске + баннер «Доступна новая версия» */}
+                              <UpdateChecker />
 
                               {/* Порядок gate'ов:
                                   1. Онбординг (модели, разрешения) - если не пройден
