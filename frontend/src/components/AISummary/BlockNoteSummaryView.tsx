@@ -148,8 +148,35 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       });
     };
     apply();
-    const interval = setInterval(apply, 300);
-    return () => clearInterval(interval);
+    // Вместо polling каждые 300мс (грузил CPU весь lifetime экрана) - реагируем
+    // на реальные изменения DOM редактора через MutationObserver, debounced
+    // через requestAnimationFrame. BlockNote перерисовывает блоки при правках -
+    // ловим только это, а не крутим querySelectorAll вхолостую.
+    let raf = 0;
+    const scheduleApply = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        apply();
+      });
+    };
+    const target = document.querySelector('.bn-container') || document.body;
+    const observer = new MutationObserver(scheduleApply);
+    observer.observe(target, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-level', 'class', 'data-content-type'],
+    });
+    // Пара отложенных применений на случай поздней инициализации редактора
+    const t1 = setTimeout(apply, 300);
+    const t2 = setTimeout(apply, 1000);
+    return () => {
+      observer.disconnect();
+      clearTimeout(t1);
+      clearTimeout(t2);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [editor, data]);
 
   // Set content loaded flag for blocknote format

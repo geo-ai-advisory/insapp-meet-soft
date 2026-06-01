@@ -7,11 +7,29 @@ use tracing::{error, info};
 pub struct MeetingsRepository;
 
 impl MeetingsRepository {
-    pub async fn get_meetings(pool: &SqlitePool) -> Result<Vec<MeetingModel>, sqlx::Error> {
-        let meetings =
-            sqlx::query_as::<_, MeetingModel>("SELECT * FROM meetings ORDER BY created_at DESC")
+    /// Список встреч. Если owner задан - только встречи этой учётки (изоляция
+    /// по логину). None - все (для внутренних задач без фильтра).
+    pub async fn get_meetings(
+        pool: &SqlitePool,
+        owner: Option<&str>,
+    ) -> Result<Vec<MeetingModel>, sqlx::Error> {
+        let meetings = match owner {
+            Some(login) => {
+                sqlx::query_as::<_, MeetingModel>(
+                    "SELECT * FROM meetings WHERE owner_login = ? ORDER BY created_at DESC",
+                )
+                .bind(login)
                 .fetch_all(pool)
-                .await?;
+                .await?
+            }
+            None => {
+                sqlx::query_as::<_, MeetingModel>(
+                    "SELECT * FROM meetings ORDER BY created_at DESC",
+                )
+                .fetch_all(pool)
+                .await?
+            }
+        };
         Ok(meetings)
     }
 

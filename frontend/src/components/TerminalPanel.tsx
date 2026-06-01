@@ -376,7 +376,7 @@ export function TerminalPanel({
   return (
     <div className="flex flex-col h-full bg-white text-gray-900">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+      <div className="flex items-center justify-between min-h-[64px] px-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <Sparkles className="w-4 h-4 text-blue-600 flex-shrink-0" />
           <span className="text-sm font-medium text-gray-900">AI-резюме</span>
@@ -406,22 +406,23 @@ export function TerminalPanel({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           <button
             onClick={onMinimize}
-            className="p-1 hover:bg-gray-200 rounded transition-colors"
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 hover:text-gray-900 rounded-md transition-colors"
             aria-label="Свернуть"
-            title="Свернуть (процесс продолжит работу, можно вернуться)"
+            title="Свернуть - процесс продолжит работу, вернуться можно по кнопке внизу справа"
           >
-            <ChevronDown className="w-4 h-4 text-gray-700" />
+            <ChevronDown className="w-4 h-4 stroke-[1.75]" />
+            Свернуть
           </button>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-gray-200 rounded transition-colors"
+            className="inline-flex items-center justify-center h-8 w-8 text-gray-500 hover:bg-gray-200 hover:text-gray-900 rounded-md transition-colors"
             aria-label="Закрыть"
-            title="Закрыть (процесс будет остановлен)"
+            title="Закрыть - процесс AI-резюме будет остановлен"
           >
-            <X className="w-4 h-4 text-gray-700" />
+            <X className="w-4 h-4 stroke-[1.75]" />
           </button>
         </div>
       </div>

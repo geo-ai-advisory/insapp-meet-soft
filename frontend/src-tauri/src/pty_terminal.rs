@@ -22,6 +22,104 @@ use tauri::{AppHandle, Emitter, Runtime};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+/// PATH обогащённый стандартными местами установки CLI-инструментов.
+///
+/// GUI-приложения на macOS, запущенные из Dock/Finder, наследуют урезанный
+/// launchd-PATH (/usr/bin:/bin:/usr/sbin:/sbin). Поэтому claude (обычно в
+/// ~/.local/bin) и codex (в /opt/homebrew/bin) НЕ находятся при spawn.
+///
+/// Собираем PATH из трёх источников: текущий PATH процесса + реальный PATH
+/// из login-shell пользователя (подхватывает nvm/asdf/кастомные пути у разных
+/// членов команды) + хардкод стандартных мест на случай если shell недоступен.
+pub fn enriched_path() -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    // 1. Текущий PATH процесса
+    if let Ok(p) = std::env::var("PATH") {
+        parts.extend(p.split(':').map(|s| s.to_string()));
+    }
+
+    // 2. Реальный PATH из login-shell пользователя (с таймаутом, чтобы не зависнуть)
+    if let Some(shell_path) = path_from_login_shell() {
+        parts.extend(shell_path.split(':').map(|s| s.to_string()));
+    }
+
+    // 3. Стандартные места установки CLI (claude, codex, npm-global, bun, cargo)
+    if let Ok(home) = std::env::var("HOME") {
+        for sub in [
+            ".local/bin",
+            ".npm-global/bin",
+            ".bun/bin",
+            ".cargo/bin",
+            ".deno/bin",
+            ".volta/bin",
+        ] {
+            parts.push(format!("{}/{}", home, sub));
+        }
+    }
+    for fixed in [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ] {
+        parts.push(fixed.to_string());
+    }
+
+    // Dedupe сохраняя порядок (первое вхождение приоритетнее)
+    let mut seen = std::collections::HashSet::new();
+    parts.retain(|p| !p.is_empty() && seen.insert(p.clone()));
+    parts.join(":")
+}
+
+/// Получает PATH из login-shell пользователя (`$SHELL -lic 'echo $PATH'`).
+/// Выполняется в отдельном потоке с таймаутом 3 сек - если shell завис или
+/// недоступен, возвращает None и используется хардкод стандартных путей.
+fn path_from_login_shell() -> Option<String> {
+    // Windows: shell-подход не нужен, там PATH наследуется корректно.
+    if cfg!(target_os = "windows") {
+        return None;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let result = std::process::Command::new(&shell)
+            .args(["-lic", "echo __PATH_START__$PATH__PATH_END__"])
+            .output();
+        let _ = tx.send(result);
+    });
+
+    let output = rx.recv_timeout(std::time::Duration::from_secs(3)).ok()?.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Вырезаем PATH между маркерами (interactive shell может напечатать prompt/мусор)
+    let start = stdout.find("__PATH_START__")? + "__PATH_START__".len();
+    let end = stdout[start..].find("__PATH_END__")? + start;
+    let path = stdout[start..end].trim().to_string();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+/// Резолвит имя команды (claude/codex) в абсолютный путь по обогащённому PATH.
+/// Если уже абсолютный путь или не нашли - возвращает как есть (pty попробует сам).
+pub fn resolve_command(command: &str, path: &str) -> String {
+    if std::path::Path::new(command).is_absolute() {
+        return command.to_string();
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+    which::which_in(command, Some(path), cwd)
+        .map(|pb| pb.to_string_lossy().to_string())
+        .unwrap_or_else(|_| command.to_string())
+}
+
 pub struct PtySession {
     pub id: String,
     pty_pair: PtyPair,
@@ -60,17 +158,22 @@ impl PtyManager {
             })
             .map_err(|e| format!("Не удалось открыть pty: {}", e))?;
 
-        let mut cmd = CommandBuilder::new(&command);
+        // GUI-приложение на macOS наследует урезанный launchd-PATH, поэтому
+        // claude/codex не находятся. Берём обогащённый PATH и резолвим команду
+        // в абсолютный путь ДО спавна - тогда поиск не зависит от PATH pty.
+        let enriched = enriched_path();
+        let resolved = resolve_command(&command, &enriched);
+        info!("pty spawn: '{}' -> '{}'", command, resolved);
+
+        let mut cmd = CommandBuilder::new(&resolved);
         for a in &args {
             cmd.arg(a);
         }
         if let Some(cwd) = cwd {
             cmd.cwd(cwd);
         }
-        // По умолчанию подключаем PATH (важно чтобы найти claude/codex)
-        if let Ok(path) = std::env::var("PATH") {
-            cmd.env("PATH", path);
-        }
+        // Передаём обогащённый PATH в окружение pty (claude может звать node/git и т.п.)
+        cmd.env("PATH", &enriched);
         if let Ok(home) = std::env::var("HOME") {
             cmd.env("HOME", home);
         }
@@ -81,7 +184,12 @@ impl PtyManager {
         let mut child = pty_pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| format!("Не удалось запустить '{}': {}", command, e))?;
+            .map_err(|e| {
+                format!(
+                    "Не удалось запустить '{}'. Проверь что инструмент установлен и доступен. Детали: {}",
+                    command, e
+                )
+            })?;
 
         let child_killer = child.clone_killer();
 
@@ -105,14 +213,43 @@ impl PtyManager {
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 4096];
+            // Накопитель незавершённых байтов: pty отдаёт данные кусками по 4096,
+            // и многобайтовый UTF-8 символ (кириллица = 2 байта) может разорваться
+            // на границе чанка. Эмитим только валидную UTF-8 часть, неполный хвост
+            // держим до следующего чтения - иначе резюме на русском бьётся в кашу.
+            let mut pending: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        // Поток закрылся - сбрасываем остаток (если есть)
+                        if !pending.is_empty() {
+                            let tail = String::from_utf8_lossy(&pending).to_string();
+                            let _ = app_clone.emit(&output_event, tail);
+                        }
+                        break;
+                    }
                     Ok(n) => {
-                        let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                        if let Err(e) = app_clone.emit(&output_event, chunk) {
-                            warn!("emit {} failed: {}", output_event, e);
-                            break;
+                        pending.extend_from_slice(&buf[..n]);
+                        // Сколько байт с начала pending образуют валидный UTF-8
+                        let valid_up_to = match std::str::from_utf8(&pending) {
+                            Ok(_) => pending.len(),
+                            Err(e) => e.valid_up_to(),
+                        };
+                        if valid_up_to > 0 {
+                            let chunk = String::from_utf8_lossy(&pending[..valid_up_to]).to_string();
+                            if let Err(e) = app_clone.emit(&output_event, chunk) {
+                                warn!("emit {} failed: {}", output_event, e);
+                                break;
+                            }
+                            pending.drain(..valid_up_to);
+                        }
+                        // Защита от разрастания при сплошном мусоре: если хвост
+                        // подозрительно большой (>8 байт) - значит это не обрезанный
+                        // символ (макс 4 байта), сбрасываем как lossy.
+                        if pending.len() > 8 {
+                            let chunk = String::from_utf8_lossy(&pending).to_string();
+                            let _ = app_clone.emit(&output_event, chunk);
+                            pending.clear();
                         }
                     }
                     Err(e) => {
@@ -138,10 +275,20 @@ impl PtyManager {
             child_killer,
         };
 
-        self.sessions
-            .lock()
-            .map_err(|_| "lock poisoned".to_string())?
-            .insert(id.clone(), session);
+        match self.sessions.lock() {
+            Ok(mut sessions) => {
+                sessions.insert(id.clone(), session);
+            }
+            Err(_) => {
+                // Mutex отравлён (другой поток паниковал держа lock). Процесс уже
+                // запущен - убиваем его, иначе claude останется работать без
+                // возможности kill через pty_kill (утечка процессов).
+                let mut s = session;
+                let _ = s.child_killer.kill();
+                error!("pty {}: sessions mutex отравлён, процесс остановлен", id);
+                return Err("Внутренняя ошибка: не удалось зарегистрировать сессию. Процесс остановлен, попробуй ещё раз.".to_string());
+            }
+        }
 
         info!("pty {} запущен: {} {:?}", id, command, args);
         Ok(id)

@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import { Copy, FolderOpen, RefreshCw, PanelRight, PanelRightClose } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -16,6 +16,10 @@ interface TranscriptButtonGroupProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  /** Видим ли сейчас правый блок резюме (для иконки тоггла). */
+  summaryVisible?: boolean;
+  /** Переключить показ правого блока резюме. Если не передан - кнопка не рендерится. */
+  onToggleSummary?: () => void;
 }
 
 
@@ -26,6 +30,8 @@ export function TranscriptButtonGroup({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  summaryVisible,
+  onToggleSummary,
 }: TranscriptButtonGroupProps) {
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
@@ -67,6 +73,25 @@ export function TranscriptButtonGroup({
           <FolderOpen className="xl:mr-2" size={18} />
           <span className="hidden lg:inline">Папка</span>
         </Button>
+
+        {/* Тоггл правого блока AI-резюме. Иногда нужен только транскрипт -
+            эта кнопка скрывает/показывает панель резюме справа. */}
+        {onToggleSummary && (
+          <Button
+            size="sm"
+            variant="outline"
+            className={summaryVisible ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100' : ''}
+            onClick={() => {
+              Analytics.trackButtonClick('toggle_summary_panel', 'meeting_details');
+              onToggleSummary();
+            }}
+            title={summaryVisible ? 'Скрыть блок резюме' : 'Показать блок резюме'}
+            aria-pressed={summaryVisible}
+          >
+            {summaryVisible ? <PanelRightClose /> : <PanelRight />}
+            <span className="hidden lg:inline">Резюме</span>
+          </Button>
+        )}
 
         {/* Кнопка «Перераспознать» (Enhance) убрана - она не про AI-резюме,
             а про повторный прогон Whisper с другими параметрами. Geo сказал

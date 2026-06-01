@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
+import { RecordingDeviceBar } from '@/components/RecordingDeviceBar';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
@@ -231,7 +232,11 @@ export default function Home() {
                   marginLeft: sidebarCollapsed ? '4rem' : '16rem'
                 }}
               >
-                <div className="w-2/3 max-w-[750px] flex flex-col items-center gap-2">
+                <div className="w-2/3 max-w-[750px] flex flex-col items-center gap-3">
+                  {/* Выбор микрофона + тумблер системного звука. Показываем всегда -
+                      и до старта, и во время записи (можно переключить устройство
+                      на лету, если, например, наушники отвалились). */}
+                  <RecordingDeviceBar isRecording={recordingState.isRecording} />
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
                       isRecording={recordingState.isRecording}

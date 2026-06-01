@@ -9,6 +9,9 @@ pub struct MeetingModel {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub folder_path: Option<String>,
+    /// Логин учётки-владельца. Список встреч фильтруется по текущей учётке.
+    #[sqlx(default)]
+    pub owner_login: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]

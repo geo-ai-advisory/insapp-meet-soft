@@ -111,8 +111,8 @@ export function SummaryPanel({
           - Badges: rounded-full pills с iconom
           Все элементы high=32px (h-8) для единой высоты. */}
       {transcripts.length > 0 && (
-        <div className="px-4 py-3 border-b border-gray-200">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center min-h-[64px] px-4 border-b border-gray-200">
+          <div className="flex flex-wrap items-center gap-2 w-full">
             <AiTerminalLauncher
               meetingId={meeting.id}
               meetingTitle={meetingTitle}

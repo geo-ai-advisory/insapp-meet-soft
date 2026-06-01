@@ -15,6 +15,7 @@ impl TranscriptsRepository {
         meeting_title: &str,
         transcripts: &[TranscriptSegment],
         folder_path: Option<String>,
+        owner_login: Option<&str>,
     ) -> Result<String, SqlxError> {
         let meeting_id = format!("meeting-{}", Uuid::new_v4());
 
@@ -23,15 +24,16 @@ impl TranscriptsRepository {
 
         let now = Utc::now();
 
-        // 1. Create the new meeting
+        // 1. Create the new meeting (с владельцем - для изоляции кэша по учётке)
         let result = sqlx::query(
-            "INSERT INTO meetings (id, title, created_at, updated_at, folder_path) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO meetings (id, title, created_at, updated_at, folder_path, owner_login) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&meeting_id)
         .bind(meeting_title)
         .bind(now)
         .bind(now)
         .bind(&folder_path)
+        .bind(owner_login)
         .execute(&mut *transaction)
         .await;
 

@@ -742,6 +742,8 @@ pub fn run() {
             insapp_server_commands::insapp_get_identity,
             insapp_server_commands::insapp_flush_queue,
             insapp_server_commands::insapp_upload_meeting_by_id,
+            insapp_server_commands::insapp_upload_all_meetings,
+            insapp_server_commands::insapp_sync_from_server,
             // Mic watcher commands (авто-попап)
             mic_watcher_commands::mic_watcher_get_settings,
             mic_watcher_commands::mic_watcher_save_settings,

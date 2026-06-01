@@ -130,11 +130,40 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
 
-  // Device configuration state
-  const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>({
-    micDevice: null,
-    systemDevice: null
+  // Device configuration state.
+  // Сохраняем выбор в localStorage чтобы он переживал перезапуск.
+  // Дефолт systemDevice = "__default__" - системный звук пишется по умолчанию
+  // (галочка "Записывать системный звук" включена). "__none__"/null трактуются
+  // как "не писать систему" на стороне UI-бара; backend пишет систему только
+  // если systemDevice не пустой.
+  const [selectedDevices, setSelectedDevicesState] = useState<SelectedDevices>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('selectedDevices');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return {
+            micDevice: parsed.micDevice ?? null,
+            systemDevice: parsed.systemDevice ?? '__default__',
+          };
+        }
+      } catch (e) {
+        console.warn('Не удалось прочитать selectedDevices из localStorage:', e);
+      }
+    }
+    return { micDevice: null, systemDevice: '__default__' };
   });
+
+  const setSelectedDevices = useCallback((devices: SelectedDevices) => {
+    setSelectedDevicesState(devices);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('selectedDevices', JSON.stringify(devices));
+      } catch (e) {
+        console.warn('Не удалось сохранить selectedDevices:', e);
+      }
+    }
+  }, []);
 
   // Language preference state
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
@@ -357,8 +386,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const prefs = await configService.getRecordingPreferences();
         if (prefs && (prefs.preferred_mic_device || prefs.preferred_system_device)) {
           setSelectedDevices({
-            micDevice: prefs.preferred_mic_device,
-            systemDevice: prefs.preferred_system_device
+            micDevice: prefs.preferred_mic_device ?? null,
+            // Системный звук пишем по умолчанию: если в prefs он не задан,
+            // оставляем "__default__" (галочка включена), а не выключаем.
+            systemDevice: prefs.preferred_system_device || '__default__'
           });
           console.log('Loaded device preferences:', prefs);
         }

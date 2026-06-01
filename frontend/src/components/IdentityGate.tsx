@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Sparkles, Loader2, ArrowRight } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "./ui/button";
 import Image from "next/image";
 
@@ -46,6 +47,29 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
         { login: login.trim(), password },
       );
       onDone();
+      // В фоне (не блокируем вход): сначала заливаем локальные встречи на сервер,
+      // потом подтягиваем облачные, которых нет локально (с других устройств).
+      invoke<{ total: number; sent: number; queued: number }>(
+        "insapp_upload_all_meetings",
+      )
+        .then((r) => {
+          if (r && r.total > 0) {
+            toast.success(
+              `Перенёс встречи на сервер: отправлено ${r.sent}` +
+                (r.queued > 0 ? `, в очереди ${r.queued}` : ""),
+            );
+          }
+          return invoke<{ synced: number; total: number }>("insapp_sync_from_server");
+        })
+        .then((s) => {
+          if (s && s.synced > 0) {
+            toast.success(`Подтянул встречи из облака: ${s.synced}`);
+            setTimeout(() => window.location.reload(), 1200);
+          }
+        })
+        .catch(() => {
+          /* синхронизацию можно повторить из профиля */
+        });
     } catch (e) {
       const msg = typeof e === "string" ? e : (e as any)?.message || String(e);
       setError(msg);
@@ -99,7 +123,7 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
             value={login}
             onChange={(e) => { setLogin(e.target.value); setError(null); }}
             onKeyDown={handleKeyDown}
-            placeholder="geom"
+            placeholder="ivan.petrov"
             autoFocus
             disabled={isLoading}
             autoComplete="username"

@@ -28,6 +28,10 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+
+  // Тоггл правого блока резюме
+  summaryVisible?: boolean;
+  onToggleSummary?: () => void;
 }
 
 export function TranscriptPanel({
@@ -48,6 +52,8 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  summaryVisible,
+  onToggleSummary,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -65,9 +71,16 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
-      {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+    <div
+      className={`hidden md:flex min-w-0 bg-white flex-col relative ${
+        summaryVisible === false
+          ? 'flex-1'
+          : 'md:w-1/4 lg:w-1/3 shrink-0 border-r border-gray-200'
+      }`}
+    >
+      {/* Title area - фикс высота h-16 (как у панели резюме) чтобы
+          разделительные линии обеих колонок были на одном уровне. */}
+      <div className="flex items-center h-16 px-4 border-b border-gray-200 shrink-0">
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
@@ -75,6 +88,8 @@ export function TranscriptPanel({
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
+          summaryVisible={summaryVisible}
+          onToggleSummary={onToggleSummary}
         />
       </div>
 

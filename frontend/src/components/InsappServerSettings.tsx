@@ -194,9 +194,10 @@ export function InsappServerSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isFlushing, setIsFlushing] = useState(false);
+  const [isUploadingAll, setIsUploadingAll] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
-  const [serverUrl, setServerUrl] = useState("http://localhost:8080");
+  const [serverUrl, setServerUrl] = useState("https://test-meet-dashboard.insapp.pro");
   const [autoUpload, setAutoUpload] = useState(true);
 
   const loadStatus = async () => {
@@ -284,6 +285,27 @@ export function InsappServerSettings() {
     }
   };
 
+  const handleUploadAll = async () => {
+    setIsUploadingAll(true);
+    try {
+      const r = await invoke<{ total: number; sent: number; queued: number; skipped: number }>(
+        "insapp_upload_all_meetings",
+      );
+      if (r.total === 0) {
+        toast.info("Нет встреч с транскриптом для отправки");
+      } else {
+        toast.success(`Отправлено на сервер: ${r.sent} из ${r.total}`, {
+          description: r.queued > 0 ? `Ещё ${r.queued} в очереди (сервер недоступен)` : undefined,
+        });
+      }
+      await loadStatus();
+    } catch (e) {
+      toast.error("Не удалось перенести встречи", { description: String(e) });
+    } finally {
+      setIsUploadingAll(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-gray-500 p-6">
@@ -345,6 +367,27 @@ export function InsappServerSettings() {
             </Button>
           </div>
         )}
+
+        {status?.is_registered && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-sm text-gray-600">
+              Перенести все встречи с этого компьютера на сервер
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleUploadAll}
+              disabled={isUploadingAll}
+            >
+              {isUploadingAll ? (
+                <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+              ) : (
+                <Cloud className="w-3 h-3 mr-2" />
+              )}
+              Перенести все встречи
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Адрес сервера */}
@@ -354,13 +397,13 @@ export function InsappServerSettings() {
           <div className="flex-1">
             <h3 className="text-base font-semibold text-gray-900 mb-1">Адрес сервера</h3>
             <p className="text-sm text-gray-600 mb-3">
-              Куда отправлять транскрипты. Локально - http://localhost:8080
+              Куда отправлять транскрипты. По умолчанию - https://test-meet-dashboard.insapp.pro
             </p>
             <input
               type="text"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="http://localhost:8080"
+              placeholder="https://test-meet-dashboard.insapp.pro"
               className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

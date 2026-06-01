@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::api::TranscriptSegment;
 
 const CREDENTIALS_FILENAME: &str = "insapp-credentials.json";
-const DEFAULT_SERVER: &str = "http://localhost:8080";
+const DEFAULT_SERVER: &str = "https://test-meet-dashboard.insapp.pro";
 
 // Общий ключ убран намеренно. Теперь каждый сотрудник регистрируется при первом
 // запуске (вводит ФИО), сервер выдаёт ему персональный ключ. Это позволяет видеть
@@ -30,7 +30,7 @@ const DEFAULT_SERVER: &str = "http://localhost:8080";
 /// Настройки интеграции с сервером Insapp - хранится в таблице settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsappServerSettings {
-    /// Адрес сервера (по умолчанию http://localhost:8080)
+    /// Адрес сервера (по умолчанию https://test-meet-dashboard.insapp.pro)
     pub server_url: String,
     /// Автоматически отправлять транскрипты после сохранения встречи
     pub auto_upload: bool,

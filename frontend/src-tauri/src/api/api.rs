@@ -329,8 +329,11 @@ pub async fn api_get_meetings<R: Runtime>(
         auth_token.is_some()
     );
     let pool = state.db_manager.pool();
+    // Изоляция кэша по учётке: показываем только встречи текущего залогиненного
+    // пользователя. Если вход не выполнен (логин пуст) - список пуст.
+    let owner = crate::insapp_server::get_full_name();
     let meetings: Result<Vec<MeetingModel>, sqlx::Error> =
-        MeetingsRepository::get_meetings(pool).await;
+        MeetingsRepository::get_meetings(pool, Some(owner.as_str())).await;
 
     match meetings {
         Ok(meeting_models) => {
@@ -975,12 +978,17 @@ pub async fn api_save_transcript<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
+    // Привязываем встречу к текущей учётке (изоляция кэша).
+    let owner = crate::insapp_server::get_full_name();
+    let owner_opt = if owner.is_empty() { None } else { Some(owner.as_str()) };
+
     // Now, call the repository with the correctly typed data.
     match TranscriptsRepository::save_transcript(
         pool,
         &meeting_title,
         &transcripts_to_save,
         folder_path,
+        owner_opt,
     )
     .await
     {

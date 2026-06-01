@@ -8,6 +8,127 @@ use crate::insapp_server::{
 };
 use crate::state::AppState;
 
+/// Разбирает markdown-транскрипт (формат segments_to_markdown) обратно в сегменты.
+/// Строки вида "**[mm:ss]** текст" или "**[hh:mm:ss]** текст".
+fn parse_markdown_to_segments(markdown: &str) -> Vec<crate::api::TranscriptSegment> {
+    let re = regex::Regex::new(r"^\*\*\[([0-9:]+)\]\*\*\s*(.+)$").unwrap();
+    let mut segments = Vec::new();
+    for line in markdown.lines() {
+        let line = line.trim();
+        if let Some(caps) = re.captures(line) {
+            let ts = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let text = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            // mm:ss или hh:mm:ss → секунды
+            let parts: Vec<f64> = ts.split(':').filter_map(|p| p.parse::<f64>().ok()).collect();
+            let secs = match parts.len() {
+                3 => parts[0] * 3600.0 + parts[1] * 60.0 + parts[2],
+                2 => parts[0] * 60.0 + parts[1],
+                1 => parts[0],
+                _ => 0.0,
+            };
+            segments.push(crate::api::TranscriptSegment {
+                id: format!("seg-{}", segments.len()),
+                text,
+                timestamp: ts.to_string(),
+                audio_start_time: Some(secs),
+                audio_end_time: None,
+                duration: None,
+            });
+        }
+    }
+    segments
+}
+
+/// Синхронизация встреч из облака: тянет с сервера транскрипты ТЕКУЩЕЙ учётки
+/// (сервер уже отдаёт только свои - изоляция по правам) и сохраняет локально те,
+/// которых ещё нет (дедуп по названию). Так встречи "подтягиваются" на новое
+/// устройство / после переустановки.
+#[tauri::command]
+pub async fn insapp_sync_from_server<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    use crate::database::repositories::meeting::MeetingsRepository;
+    use crate::database::repositories::transcript::TranscriptsRepository;
+    use std::collections::HashSet;
+
+    let pool = state.db_manager.pool();
+    let settings = insapp_server::load_settings(pool).await;
+    let api_key = insapp_server::get_api_key();
+    if api_key.is_empty() {
+        return Err("Сначала войди под своей учётной записью".to_string());
+    }
+    // Учётка владельца - под ней синхронизированные встречи сохранятся локально.
+    let owner = insapp_server::get_full_name();
+
+    let base = settings.server_url.trim_end_matches('/').to_string();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("client: {}", e))?;
+
+    // 1. Список серверных транскриптов (сервер вернёт только доступные этой учётке)
+    let list_url = format!("{}/api/v1/transcripts?limit=200", base);
+    let resp = client
+        .get(&list_url)
+        .header("X-Insapp-Api-Key", &api_key)
+        .send()
+        .await
+        .map_err(|e| format!("Не удалось получить список с сервера: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Сервер вернул {}", resp.status()));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| format!("parse: {}", e))?;
+    let empty = vec![];
+    let items = json.get("items").and_then(|v| v.as_array()).unwrap_or(&empty);
+
+    // 2. Локальные названия для дедупа (только свои - этой учётки)
+    let local = MeetingsRepository::get_meetings(pool, Some(owner.as_str()))
+        .await
+        .map_err(|e| format!("Не удалось прочитать локальные встречи: {}", e))?;
+    let local_titles: HashSet<String> = local.iter().map(|m| m.title.trim().to_string()).collect();
+
+    let mut synced = 0usize;
+    let total = items.len();
+
+    for item in items {
+        let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("transcript");
+        if kind != "transcript" {
+            continue; // summary тянем вместе с встречей отдельной логикой; здесь - транскрипты
+        }
+        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if title.is_empty() || id.is_empty() || local_titles.contains(&title) {
+            continue; // уже есть локально
+        }
+
+        // 3. markdown содержимое
+        let md_url = format!("{}/api/v1/transcripts/{}?raw=1", base, id);
+        let md = match client.get(&md_url).header("X-Insapp-Api-Key", &api_key).send().await {
+            Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
+            _ => continue,
+        };
+        let segments = parse_markdown_to_segments(&md);
+        if segments.is_empty() {
+            continue;
+        }
+
+        // 4. Сохраняем локально (repository напрямую - без обратной заливки на сервер)
+        if TranscriptsRepository::save_transcript(pool, &title, &segments, None, Some(owner.as_str()))
+            .await
+            .is_ok()
+        {
+            synced += 1;
+        }
+    }
+
+    tracing::info!("[insapp_sync] synced={} из {} серверных", synced, total);
+    Ok(serde_json::json!({ "synced": synced, "total": total }))
+}
+
 #[tauri::command]
 pub async fn insapp_get_status<R: Runtime>(
     _app: tauri::AppHandle<R>,
@@ -262,6 +383,95 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
     Ok(serde_json::json!({
         "status": status_str,
         "meeting_id": meeting_id,
+    }))
+}
+
+/// Отправить ВСЕ встречи с транскриптами на сервер. Используется при первом
+/// входе на новый сервер - переносит существующие заметки встреч. Идёт напрямую
+/// через upload_transcript (не зависит от настройки auto_upload); что не
+/// отправилось из-за недоступности сервера - кладётся в очередь на ретрай.
+#[tauri::command]
+pub async fn insapp_upload_all_meetings<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    use crate::database::repositories::meeting::MeetingsRepository;
+
+    let pool = state.db_manager.pool();
+    let settings = insapp_server::load_settings(pool).await;
+    let api_key = insapp_server::get_api_key();
+
+    if api_key.is_empty() {
+        return Err("Сначала войди под своей учётной записью".to_string());
+    }
+
+    // Заливаем на сервер только встречи текущей учётки.
+    let owner = insapp_server::get_full_name();
+    let meetings = MeetingsRepository::get_meetings(pool, Some(owner.as_str()))
+        .await
+        .map_err(|e| format!("Не удалось прочитать список встреч: {}", e))?;
+
+    let mut total = 0usize;
+    let mut sent = 0usize;
+    let mut queued = 0usize;
+    let mut skipped = 0usize;
+
+    for m in &meetings {
+        let full = match MeetingsRepository::get_meeting(pool, &m.id).await {
+            Ok(Some(f)) => f,
+            _ => {
+                skipped += 1;
+                continue;
+            }
+        };
+        let segments: Vec<crate::api::TranscriptSegment> = full
+            .transcripts
+            .iter()
+            .map(|t| crate::api::TranscriptSegment {
+                id: t.id.clone(),
+                text: t.text.clone(),
+                timestamp: t.timestamp.clone(),
+                audio_start_time: t.audio_start_time,
+                audio_end_time: t.audio_end_time,
+                duration: t.duration,
+            })
+            .collect();
+        if segments.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        total += 1;
+
+        let duration_sec = segments
+            .iter()
+            .filter_map(|s| s.audio_end_time)
+            .fold(0.0_f64, f64::max);
+        let duration_sec = if duration_sec > 0.0 { Some(duration_sec) } else { None };
+
+        let markdown = insapp_server::segments_to_markdown(&full.title, &segments);
+        let meta = insapp_server::TranscriptMeta::for_transcript(&m.id, &full.title, duration_sec);
+
+        match insapp_server::upload_transcript(&settings.server_url, &api_key, &markdown, &meta).await {
+            Ok(SyncStatus::Sent) => sent += 1,
+            Ok(SyncStatus::Pending) | Err(_) => {
+                // Сервер недоступен - в очередь на ретрай
+                let _ = insapp_server::enqueue_upload(pool, &m.id, &markdown, &meta).await;
+                queued += 1;
+            }
+            Ok(_) => {}
+        }
+    }
+
+    tracing::info!(
+        "[insapp_upload_all] total={} sent={} queued={} skipped={}",
+        total, sent, queued, skipped
+    );
+
+    Ok(serde_json::json!({
+        "total": total,
+        "sent": sent,
+        "queued": queued,
+        "skipped": skipped,
     }))
 }
 

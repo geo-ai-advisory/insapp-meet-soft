@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { UserProfileButton } from '@/components/UserProfileButton';
 
 import {
   Dialog,
@@ -543,6 +544,9 @@ const Sidebar: React.FC = () => {
           </Tooltip>
 
           <Info isCollapsed={isCollapsed} />
+
+          {/* Профиль пользователя - имя залогиненного + выход/вход */}
+          <UserProfileButton collapsed={true} />
         </div>
       </TooltipProvider>
     );
@@ -810,6 +814,11 @@ const Sidebar: React.FC = () => {
             </Button>
 
             <Info isCollapsed={isCollapsed} />
+
+            {/* Профиль пользователя - имя залогиненного + выход/вход */}
+            <div className="w-full pt-1 border-t border-gray-100 mt-1">
+              <UserProfileButton collapsed={false} />
+            </div>
 
             <div className="w-full flex items-center justify-center pt-1 text-xs text-gray-400">
               v0.3.0

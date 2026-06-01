@@ -202,8 +202,11 @@ pub async fn ai_summary_check_cli<R: Runtime>(
         return Ok(Some(command));
     }
 
-    // Иначе ищем в PATH
-    if let Ok(path) = which::which(&command) {
+    // Иначе ищем в обогащённом PATH (GUI-приложение наследует урезанный
+    // launchd-PATH, в котором нет ~/.local/bin и /opt/homebrew/bin).
+    let enriched = crate::pty_terminal::enriched_path();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+    if let Ok(path) = which::which_in(&command, Some(&enriched), cwd) {
         Ok(Some(path.to_string_lossy().to_string()))
     } else {
         Ok(None)

@@ -59,6 +59,9 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+  // Показ правого блока AI-резюме. Тогглится кнопкой «Резюме» в левой панели -
+  // иногда нужен только транскрипт.
+  const [showSummary, setShowSummary] = useState<boolean>(true);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -193,7 +196,10 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          summaryVisible={showSummary}
+          onToggleSummary={() => setShowSummary((v) => !v)}
         />
+        {showSummary && (
         <SummaryPanel
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}
@@ -230,6 +236,7 @@ export default function PageContent({
           onOpenModelSettings={handleRegisterModalOpen}
           onAiSummarySaved={onAiSummarySaved}
         />
+        )}
       </div>
     </motion.div>
   );

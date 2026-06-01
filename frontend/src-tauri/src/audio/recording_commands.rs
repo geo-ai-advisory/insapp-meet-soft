@@ -360,12 +360,34 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         None
     };
 
-    let system_device = if let Some(ref name) = system_device_name {
-        Some(Arc::new(parse_audio_device(name).map_err(|e| {
+    // Резолв системного звука по сигналу из UI:
+    //  - "__default__" - чекбокс "Записывать системный звук" включён без явного
+    //    выбора: пишем с устройства вывода по умолчанию.
+    //  - None - чекбокс выключен: пишем только микрофон.
+    //  - конкретное имя - пишем с выбранного устройства.
+    let system_device = match system_device_name.as_deref() {
+        Some("__default__") => match default_output_device() {
+            Ok(d) => {
+                info!("🔊 Системный звук: устройство вывода по умолчанию '{}'", d.name);
+                Some(Arc::new(d))
+            }
+            Err(e) => {
+                warn!(
+                    "⚠️ Системный звук включён, но устройство по умолчанию недоступно: {}. Пишем только микрофон.",
+                    e
+                );
+                None
+            }
+        },
+        // "__none__"/пусто - системный звук выключен (в т.ч. legacy-значение из
+        // старого localStorage). Пишем только микрофон, не падаем.
+        Some("__none__") | Some("") | None => {
+            info!("🔇 Системный звук отключён в UI - пишем только микрофон");
+            None
+        }
+        Some(name) => Some(Arc::new(parse_audio_device(name).map_err(|e| {
             format!("Invalid system device '{}': {}", name, e)
-        })?))
-    } else {
-        None
+        })?)),
     };
 
     // Async-first approach for custom devices - no more blocking operations!
