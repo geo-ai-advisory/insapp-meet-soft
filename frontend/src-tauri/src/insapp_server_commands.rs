@@ -125,8 +125,42 @@ pub async fn insapp_sync_from_server<R: Runtime>(
         }
     }
 
-    tracing::info!("[insapp_sync] synced={} из {} серверных", synced, total);
-    Ok(serde_json::json!({ "synced": synced, "total": total }))
+    // ОЧИСТКА ЧУЖИХ КОПИЙ (безопасная): удаляем локально СКАЧАННЫЕ встречи
+    // (folder_path пустой = пришли с сервера, не записаны тут), которых сервер
+    // БОЛЬШЕ не отдаёт этой учётке. После фикса изоляции сервер возвращает только
+    // свои, поэтому скачанная встреча, которой нет в ответе - это чужая запись,
+    // просочившаяся до фикса. Записанные локально (folder_path заполнен) НЕ трогаем -
+    // они принадлежат владельцу и на сервере могут ещё не лежать.
+    let server_titles: HashSet<String> = items
+        .iter()
+        .filter_map(|i| i.get("title").and_then(|v| v.as_str()))
+        .map(|s| s.trim().to_string())
+        .collect();
+    let mut purged = 0usize;
+    for m in &local {
+        let is_downloaded = m
+            .folder_path
+            .as_deref()
+            .map(|p| p.trim().is_empty())
+            .unwrap_or(true);
+        if is_downloaded && !server_titles.contains(m.title.trim()) {
+            if MeetingsRepository::delete_meeting(pool, &m.id).await.unwrap_or(false) {
+                purged += 1;
+            }
+        }
+    }
+    if purged > 0 {
+        tracing::warn!(
+            "[insapp_sync] вычищено {} чужих скачанных встреч из локального кэша",
+            purged
+        );
+    }
+
+    tracing::info!(
+        "[insapp_sync] synced={} из {} серверных, purged={}",
+        synced, total, purged
+    );
+    Ok(serde_json::json!({ "synced": synced, "total": total, "purged": purged }))
 }
 
 #[tauri::command]

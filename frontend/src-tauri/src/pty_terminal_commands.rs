@@ -647,9 +647,11 @@ pub async fn ai_summary_request_save<R: Runtime>(
     let payload = format!("\x1b[200~{}\x1b[201~\r", save_command);
     state_pty.write(&session_id, payload.as_bytes())?;
 
-    // Polling файла каждые 1 сек, до 60 сек.
-    // 60 сек хватает на AI-ответ + write tool call.
-    for _ in 0..60 {
+    // Polling файла каждые 1 сек, до 180 сек.
+    // Раньше было 60 сек, но на холодном старте AI (первый запуск + ретраи запроса)
+    // ответ + write tool call не успевал за 60с -> приходилось сохранять со второго раза.
+    // 180 сек покрывают медленную первую генерацию.
+    for _ in 0..180 {
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         if let Ok(content) = std::fs::read_to_string(&output_file) {
             if content.trim().len() > 30 {
@@ -658,7 +660,7 @@ pub async fn ai_summary_request_save<R: Runtime>(
         }
     }
 
-    Err("AI не записал файл за 60 секунд. Попробуй ещё раз или попроси AI повторить.".to_string())
+    Err("AI не записал файл за 3 минуты. Попробуй ещё раз или попроси AI повторить.".to_string())
 }
 
 /// Прочитать резюме созданное AI (через tool Write) из summaries/<meeting_id>.md.
