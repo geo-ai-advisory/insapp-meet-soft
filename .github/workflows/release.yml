@@ -158,6 +158,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Постоянные ссылки «всегда последняя версия» для рассылки команде.
+      # Дублируем инсталляторы под именами БЕЗ версии -> ссылка
+      # /releases/latest/download/Insapp-meet-mac.dmg всегда отдаёт свежий релиз.
+      - name: Upload stable-named installers (always-latest links)
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          rm -rf stable && mkdir -p stable
+          gh release download "v${VERSION}" --pattern "*aarch64.dmg" --dir stable || true
+          gh release download "v${VERSION}" --pattern "*x64-setup.exe" --dir stable || true
+          MAC=$(ls stable/*aarch64.dmg 2>/dev/null | head -1)
+          WIN=$(ls stable/*x64-setup.exe 2>/dev/null | head -1)
+          if [ -n "$MAC" ]; then
+            cp "$MAC" "stable/Insapp-meet-mac.dmg"
+            gh release upload "v${VERSION}" "stable/Insapp-meet-mac.dmg" --clobber -R ${{ github.repository }}
+            echo "stable Mac link uploaded"
+          fi
+          if [ -n "$WIN" ]; then
+            cp "$WIN" "stable/Insapp-meet-windows-setup.exe"
+            gh release upload "v${VERSION}" "stable/Insapp-meet-windows-setup.exe" --clobber -R ${{ github.repository }}
+            echo "stable Windows link uploaded"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Release Summary
         run: |
           echo "============================================"
