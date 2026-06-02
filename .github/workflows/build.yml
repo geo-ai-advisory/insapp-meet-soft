@@ -571,13 +571,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ${{ inputs.sign-binaries && secrets.APPLE_ID || '' }}
-          APPLE_ID_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_ID_PASSWORD || '' }}
-          APPLE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ inputs.sign-binaries && secrets.APPLE_TEAM_ID || '' }}
-          APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
+          # ВАЖНО: НЕ задавать APPLE_CERTIFICATE/APPLE_SIGNING_IDENTITY пустой строкой.
+          # tauri-bundler проверяет САМ ФАКТ наличия переменной (даже пустой) и тогда
+          # зовёт `security import` с пустым сертификатом → падение на этапе bundle
+          # (`SecKeychainItemImport: parameters not valid`). Без этих переменных
+          # signingIdentity="-" из tauri.conf.json даёт ad-hoc подпись без сертификата.
+          # Когда появятся реальные Apple-сертификаты — вернуть строки ниже и sign-binaries:true:
+          #   APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID/APPLE_CERTIFICATE/..._PASSWORD/APPLE_SIGNING_IDENTITY
           # Tauri updater signing (ALWAYS enabled for .sig files)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
