@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { User, LogOut, LogIn, Loader2, RefreshCw } from 'lucide-react';
+import { User, LogOut, LogIn, Loader2, RefreshCw, DownloadCloud } from 'lucide-react';
+import { triggerUpdateCheck } from '@/components/UpdateChecker';
 import { toast } from 'sonner';
 
 interface Identity {
@@ -97,24 +98,35 @@ export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
           )}
         </button>
       ) : (
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-colors duration-150 hover:bg-gray-100 text-left"
-          aria-label="Профиль"
-        >
-          <span className="relative shrink-0">
-            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-50 text-blue-600">
-              <User className="w-4 h-4 stroke-[1.75]" />
+        <div className="flex items-center gap-1 w-full">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-2.5 flex-1 min-w-0 px-2.5 py-2 rounded-lg transition-colors duration-150 hover:bg-gray-100 text-left"
+            aria-label="Профиль"
+          >
+            <span className="relative shrink-0">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-50 text-blue-600">
+                <User className="w-4 h-4 stroke-[1.75]" />
+              </span>
+              {registered && (
+                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full ring-2 ring-white" />
+              )}
             </span>
-            {registered && (
-              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full ring-2 ring-white" />
-            )}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-gray-900 truncate">{name}</span>
-            <span className="block text-xs text-gray-400">{registered ? 'В сети' : 'Нажми, чтобы войти'}</span>
-          </span>
-        </button>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-gray-900 truncate">{name}</span>
+              <span className="block text-xs text-gray-400">{registered ? 'В сети' : 'Нажми, чтобы войти'}</span>
+            </span>
+          </button>
+          {/* Кнопка проверки обновления - справа от имени */}
+          <button
+            onClick={() => triggerUpdateCheck()}
+            title="Проверить обновление"
+            aria-label="Проверить обновление"
+            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-blue-600 transition-colors"
+          >
+            <DownloadCloud className="w-4 h-4 stroke-[1.75]" />
+          </button>
+        </div>
       )}
 
       {/* Inline-меню */}
