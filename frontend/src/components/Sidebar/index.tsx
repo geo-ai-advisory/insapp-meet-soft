@@ -11,6 +11,7 @@ import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -46,6 +47,9 @@ interface SidebarItem {
 const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
+  // Версия приложения - читается из Tauri, чтобы не хардкодить и не врать после обновления
+  const [appVersion, setAppVersion] = useState('');
+  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
   const {
     currentMeeting,
     setCurrentMeeting,
@@ -849,7 +853,7 @@ const Sidebar: React.FC = () => {
             </div>
 
             <div className="w-full flex items-center justify-center pt-1 text-xs text-gray-400">
-              v0.3.0
+              {appVersion ? `v${appVersion}` : ''}
             </div>
           </div>
         )}
