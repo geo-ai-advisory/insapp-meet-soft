@@ -3,6 +3,7 @@
 import React, { useEffect, ReactNode, useRef, useState, createContext } from 'react';
 import Analytics from '@/lib/analytics';
 import { load } from '@tauri-apps/plugin-store';
+import { getVersion } from '@tauri-apps/api/app';
 
 
 interface AnalyticsProviderProps {
@@ -82,7 +83,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
 
       // Identify user with enhanced properties immediately after init
       await Analytics.identify(userId, {
-        app_version: '0.3.0',
+        app_version: await getVersion(),
         platform: deviceInfo.platform,
         os_version: deviceInfo.os_version,
         architecture: deviceInfo.architecture,
