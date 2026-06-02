@@ -105,7 +105,10 @@ jobs:
       platform: ${{ matrix.platform }}
       target: ${{ matrix.target }}
       build-args: ${{ matrix.args }}
-      sign-binaries: true
+      # Apple Developer / DigiCert сертификаты не настроены (секретов нет).
+      # Updater работает на minisign-подписи (.sig), она включена ВСЕГДА.
+      # Поэтому подпись бинарей выключена — иначе шаг импорта сертификата падает.
+      sign-binaries: false
       asset-prefix: "meetily"
       upload-artifacts: false  # tauri-action uploads directly to release
       release-id: ${{ needs.create-release.outputs.release-id }}
