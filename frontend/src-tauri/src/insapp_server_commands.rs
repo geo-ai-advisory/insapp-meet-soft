@@ -451,6 +451,19 @@ pub async fn insapp_upload_all_meetings<R: Runtime>(
     let mut skipped = 0usize;
 
     for m in &meetings {
+        // НЕ заливаем обратно СКАЧАННЫЕ встречи (folder_path пустой = пришли с сервера
+        // через синхронизацию, не записаны тут). Иначе чужие синхронизированные копии
+        // уходят на сервер под нашей учёткой, и мы становимся «загрузившим» - это и есть
+        // петля утечки: скачал чужое -> залил обратно -> видишь как своё.
+        let is_downloaded = m
+            .folder_path
+            .as_deref()
+            .map(|p| p.trim().is_empty())
+            .unwrap_or(true);
+        if is_downloaded {
+            skipped += 1;
+            continue;
+        }
         let full = match MeetingsRepository::get_meeting(pool, &m.id).await {
             Ok(Some(f)) => f,
             _ => {
