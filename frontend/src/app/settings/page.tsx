@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Cloud } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, MicOff, Database as DatabaseIcon, SparkleIcon, FlaskConical, Cloud } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
@@ -11,6 +11,7 @@ import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { InsappServerSettings } from '@/components/InsappServerSettings';
 import { AiSummarySettings } from '@/components/AiSummarySettings';
+import { MicIgnoredAppsSettings } from '@/components/MicIgnoredAppsSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -21,6 +22,7 @@ const TABS = [
   { value: 'Transcriptionmodels', label: 'Распознавание', icon: DatabaseIcon },
   { value: 'aiSummary', label: 'AI-резюме', icon: SparkleIcon },
   { value: 'insappServer', label: 'Сервер Insapp', icon: Cloud },
+  { value: 'micIgnore', label: 'Игнор микрофона', icon: MicOff },
   { value: 'beta', label: 'Бета', icon: FlaskConical }
 ] as const;
 
@@ -128,6 +130,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="insappServer" className="mt-6">
               <InsappServerSettings />
+            </TabsContent>
+            <TabsContent value="micIgnore" className="mt-6">
+              <MicIgnoredAppsSettings />
             </TabsContent>
             <TabsContent value="beta" className="mt-6">
               <BetaSettings />
