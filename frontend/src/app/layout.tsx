@@ -20,6 +20,7 @@ import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
 import { IdentityGate } from '@/components/IdentityGate'
 import { UpdateChecker } from '@/components/UpdateChecker'
+import { MicIgnoreToast } from '@/components/MicIgnoreToast'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
@@ -317,6 +318,8 @@ export default function RootLayout({
 
                               {/* Авто-проверка обновлений при запуске + баннер «Доступна новая версия» */}
                               <UpdateChecker />
+                              {/* Тост после «Игнорировать» в окне микрофона */}
+                              <MicIgnoreToast />
 
                               {/* Порядок gate'ов:
                                   1. Онбординг (модели, разрешения) - если не пройден

@@ -156,10 +156,25 @@ pub async fn meeting_popup_record<R: Runtime>(
 
 #[tauri::command]
 pub async fn meeting_popup_dismiss<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     bundle_id: String,
+    name: Option<String>,
 ) -> Result<(), String> {
-    info!("[meeting_popup] пользователь нажал «Игнорировать» (bundle={})", bundle_id);
-    // mic_watcher state уже отметил can_show=false (cooldown 5 мин)
+    let nm = name.unwrap_or_default();
+    info!("[meeting_popup] «Игнорировать» (bundle={}, name={}) - добавляю в игнор навсегда", bundle_id, nm);
+
+    // ПОСТОЯННЫЙ игнор: приложение больше не будет вызывать окно (переживает перезапуск).
+    if let Some(st) = app.try_state::<std::sync::Arc<crate::mic_watcher::MicWatcherState>>() {
+        st.add_to_blacklist(&bundle_id, &nm);
+        st.mark_ignored(&bundle_id);
+    }
+
+    // Тост в главном окне: «<App> добавлено в игнорируемые».
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.emit(
+            "mic-app-ignored",
+            &serde_json::json!({ "name": nm, "bundle_id": bundle_id }),
+        );
+    }
     Ok(())
 }

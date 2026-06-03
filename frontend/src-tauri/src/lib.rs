@@ -749,6 +749,7 @@ pub fn run() {
             mic_watcher_commands::mic_watcher_get_settings,
             mic_watcher_commands::mic_watcher_save_settings,
             mic_watcher_commands::mic_watcher_mark_ignored,
+            mic_watcher_commands::mic_watcher_unignore,
             mic_watcher_commands::mic_watcher_set_enabled,
             // PTY terminal (Phase 2: AI summary через внешний CLI)
             pty_terminal_commands::pty_spawn,

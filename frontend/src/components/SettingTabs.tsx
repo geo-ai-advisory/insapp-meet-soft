@@ -3,6 +3,7 @@ import { ModelConfig, ModelSettingsModal } from "./ModelSettingsModal"
 import { TranscriptModelProps, TranscriptSettings } from "./TranscriptSettings"
 import { RecordingSettings, RecordingPreferences } from "./RecordingSettings"
 import { About } from "./About";
+import { MicIgnoredAppsSettings } from "./MicIgnoredAppsSettings";
 
 interface SettingTabsProps {
     modelConfig: ModelConfig;
@@ -36,6 +37,7 @@ export function SettingTabs({
     <TabsTrigger value="transcriptSettings">Распознавание</TabsTrigger>
     <TabsTrigger value="modelSettings">AI-резюме</TabsTrigger>
     <TabsTrigger value="recordingSettings">Запись</TabsTrigger>
+    <TabsTrigger value="micIgnore">Игнор микрофона</TabsTrigger>
     <TabsTrigger value="about">О приложении</TabsTrigger>
   </TabsList>
   <TabsContent value="modelSettings">
@@ -55,6 +57,9 @@ onSave={onSave}
   </TabsContent>
   <TabsContent value="recordingSettings">
     <RecordingSettings />
+  </TabsContent>
+  <TabsContent value="micIgnore">
+    <MicIgnoredAppsSettings />
   </TabsContent>
   <TabsContent value="about">
     <About />

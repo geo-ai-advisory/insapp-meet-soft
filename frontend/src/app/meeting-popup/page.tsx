@@ -75,7 +75,7 @@ export default function MeetingPopupPage() {
 
   const handleDismiss = async () => {
     try {
-      await invoke("meeting_popup_dismiss", { bundleId: data?.bundle_id ?? "" });
+      await invoke("meeting_popup_dismiss", { bundleId: data?.bundle_id ?? "", name: data?.app_name ?? "" });
     } catch (e) {
       console.error("dismiss failed", e);
     }

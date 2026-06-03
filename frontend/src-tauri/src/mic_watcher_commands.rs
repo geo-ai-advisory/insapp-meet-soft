@@ -24,13 +24,29 @@ pub async fn mic_watcher_save_settings<R: Runtime>(
     Ok(())
 }
 
+/// «Игнорировать» в окне-попапе: ПОСТОЯННО добавить приложение в игнор + сохранить
+/// на диск (переживает перезапуск). Также ставим кулдаун, чтобы окно сразу не мигало.
 #[tauri::command]
 pub async fn mic_watcher_mark_ignored<R: Runtime>(
     _app: tauri::AppHandle<R>,
     state: State<'_, Arc<MicWatcherState>>,
     bundle_id: String,
+    name: Option<String>,
 ) -> Result<(), String> {
+    let nm = name.unwrap_or_default();
+    state.add_to_blacklist(&bundle_id, &nm);
     state.mark_ignored(&bundle_id);
+    Ok(())
+}
+
+/// «Вернуть» приложение из списка игнорируемых (Настройки → Игнорируемые приложения).
+#[tauri::command]
+pub async fn mic_watcher_unignore<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    state: State<'_, Arc<MicWatcherState>>,
+    bundle_id: String,
+) -> Result<(), String> {
+    state.remove_from_blacklist(&bundle_id);
     Ok(())
 }
 
