@@ -96,7 +96,11 @@ jobs:
           - platform: "macos-latest" # for Apple Silicon only (M1 and above)
             args: "--target aarch64-apple-darwin"
             target: "aarch64-apple-darwin"
-          - platform: "macos-13" # Intel Macs (x86_64) - нативный Intel-раннер
+          # Intel Macs (x86_64) - кросс-компиляция на Apple Silicon раннере.
+          # macos-13 (нативные Intel-раннеры) GitHub фактически свернул - очередь
+          # бесконечная. Кросс-компиляция проверена: ffmpeg тянется по TARGET (x86_64),
+          # бинари все x86_64/universal.
+          - platform: "macos-latest"
             args: "--target x86_64-apple-darwin"
             target: "x86_64-apple-darwin"
           - platform: "windows-latest"
