@@ -96,6 +96,9 @@ jobs:
           - platform: "macos-latest" # for Apple Silicon only (M1 and above)
             args: "--target aarch64-apple-darwin"
             target: "aarch64-apple-darwin"
+          - platform: "macos-13" # Intel Macs (x86_64) - нативный Intel-раннер
+            args: "--target x86_64-apple-darwin"
+            target: "x86_64-apple-darwin"
           - platform: "windows-latest"
             args: ""
             target: "x86_64-pc-windows-msvc"
@@ -166,13 +169,20 @@ jobs:
           VERSION="${{ needs.create-release.outputs.version }}"
           rm -rf stable && mkdir -p stable
           gh release download "v${VERSION}" --pattern "*aarch64.dmg" --dir stable || true
+          gh release download "v${VERSION}" --pattern "*x64.dmg" --dir stable || true
           gh release download "v${VERSION}" --pattern "*x64-setup.exe" --dir stable || true
           MAC=$(ls stable/*aarch64.dmg 2>/dev/null | head -1)
+          INTEL=$(ls stable/*x64.dmg 2>/dev/null | head -1)
           WIN=$(ls stable/*x64-setup.exe 2>/dev/null | head -1)
           if [ -n "$MAC" ]; then
             cp "$MAC" "stable/Insapp-meet-mac.dmg"
             gh release upload "v${VERSION}" "stable/Insapp-meet-mac.dmg" --clobber -R ${{ github.repository }}
-            echo "stable Mac link uploaded"
+            echo "stable Apple Silicon Mac link uploaded"
+          fi
+          if [ -n "$INTEL" ]; then
+            cp "$INTEL" "stable/Insapp-meet-mac-intel.dmg"
+            gh release upload "v${VERSION}" "stable/Insapp-meet-mac-intel.dmg" --clobber -R ${{ github.repository }}
+            echo "stable Intel Mac link uploaded"
           fi
           if [ -n "$WIN" ]; then
             cp "$WIN" "stable/Insapp-meet-windows-setup.exe"
