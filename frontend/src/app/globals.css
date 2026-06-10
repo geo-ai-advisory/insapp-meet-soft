@@ -241,6 +241,20 @@ main h2 {
   line-height: 1.75rem;
   font-weight: 600;
 }
+/* Волна записи (3 полоски в кнопке) - чистый CSS вместо setState каждые 300мс.
+   Анимируем transform: scaleY (GPU, без layout, без React-ре-рендеров главного экрана). */
+@keyframes wave-bar {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.wave-bar {
+  transform-origin: center;
+  animation: wave-bar 0.85s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wave-bar { animation: none; transform: scaleY(0.6); }
+}
+
 .app-typography h3,
 main h3 {
   font-size: 1.125rem;

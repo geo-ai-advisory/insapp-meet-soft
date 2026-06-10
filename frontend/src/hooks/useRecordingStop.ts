@@ -199,9 +199,11 @@ export function useRecordingStop(
         console.warn('⏰ Transcription wait timeout reached after', elapsedTime, 'ms');
       } else {
         console.log('✅ Transcription completed after', elapsedTime, 'ms');
-        // Wait longer for any late transcript segments (increased from 1s to 4s)
+        // Короткий буфер на поздние сегменты. Было 4000мс - пользователь смотрел
+        // на спиннер «Завершаю распознавание» впустую 4 секунды. 800мс + ниже
+        // принудительный flushBuffer (ловит весь остаток) -> завершение быстрее на ~3с.
         console.log('⏳ Waiting for late transcript segments...');
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        await new Promise(resolve => setTimeout(resolve, 800));
       }
 
       // Final buffer flush: process ALL remaining transcripts regardless of timing

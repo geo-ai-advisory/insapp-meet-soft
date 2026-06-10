@@ -82,6 +82,10 @@ export function useRecordingStart(
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
     try {
+      // Мгновенный фидбэк: кнопка сразу показывает "запускаю" ДО проверок модели.
+      // Проверки занимают 0.5-2с; без этого кнопка молчит и кажется что клик не сработал.
+      setStatus(RecordingStatus.STARTING, 'Проверка модели...');
+
       console.log('handleRecordingStart called - checking Parakeet model status');
 
       // Check if Parakeet transcription model is ready before starting
@@ -205,7 +209,7 @@ export function useRecordingStart(
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
             setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to auto-start recording');
-            alert('Failed to start recording. Check console for details.');
+            toast.error('Не удалось начать запись', { description: 'Попробуй ещё раз или проверь микрофон.' });
             Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
           } finally {
             setIsAutoStarting(false);
@@ -292,7 +296,7 @@ export function useRecordingStart(
       } catch (error) {
         console.error('Failed to start recording from sidebar:', error);
         setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording from sidebar');
-        alert('Failed to start recording. Check console for details.');
+        toast.error('Не удалось начать запись', { description: 'Попробуй ещё раз или проверь микрофон.' });
         Analytics.trackButtonClick('start_recording_error', 'sidebar_direct');
       } finally {
         setIsAutoStarting(false);

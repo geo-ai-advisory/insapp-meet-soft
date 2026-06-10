@@ -544,9 +544,12 @@ pub async fn try_upload_meeting<R: Runtime>(
         );
         return SyncStatus::Failed;
     }
+    // Логируем только ДЛИНУ ключа, не его начало (а) без утечки части секрета в логи,
+    // (б) без паники: байтовый срез &api_key[..8] падал если ключ введён вручную и
+    // содержит многобайтовый символ (кириллицу) - крашил Tauri-процесс.
     tracing::info!(
-        "[insapp_upload] API key найден ({}...), segments={}, начинаю upload",
-        &api_key[..api_key.len().min(8)],
+        "[insapp_upload] API key найден (длина {}), segments={}, начинаю upload",
+        api_key.chars().count(),
         segments.len()
     );
 

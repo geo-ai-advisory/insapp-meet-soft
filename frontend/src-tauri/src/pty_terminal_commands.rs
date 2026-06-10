@@ -234,6 +234,12 @@ pub async fn ai_summary_start<R: Runtime>(
     cols: u16,
     rows: u16,
 ) -> Result<SummarySessionStart, String> {
+    // Защита от path traversal: meeting_id идёт в имена временного файла и файла резюме.
+    if meeting_id.is_empty()
+        || !meeting_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Некорректный идентификатор встречи".to_string());
+    }
     let pool = state_app.db_manager.pool();
     let settings = load_ai_settings(pool).await;
 
@@ -342,8 +348,14 @@ pub async fn ai_summary_start<R: Runtime>(
         let session_id_clone = session_id.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
-            let payload = format!("\x1b[200~{}\x1b[201~\r", full_prompt);
-            let _ = pty_manager.write(&session_id_clone, payload.as_bytes());
+            // Раздельная отправка (как в ai_summary_request_save): вставка,
+            // пауза, ОТДЕЛЬНЫЙ Enter. Склеенный `\r` после \x1b[201~ TUI
+            // claude/codex отправляет НЕ всегда (~30% промахов, проверено
+            // pty-репро) - тогда резюме не начинало генерироваться.
+            let paste = format!("\x1b[200~{}\x1b[201~", full_prompt);
+            let _ = pty_manager.write(&session_id_clone, paste.as_bytes());
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let _ = pty_manager.write(&session_id_clone, b"\r");
         });
     }
 
@@ -563,9 +575,15 @@ fn build_cli_invocation(
 ) -> (String, Vec<String>, String) {
     let output_str = output_path.to_string_lossy().to_string();
     let transcript_str = transcript_path.to_string_lossy().to_string();
+    // Убираем управляющие символы из названия встречи (берётся из БД): символ
+    // \x1b мог сломать bracketed-paste и подсунуть команды в claude TUI.
+    let safe_title: String = title
+        .chars()
+        .map(|c| if (c as u32) < 0x20 { ' ' } else { c })
+        .collect();
     let prompt = settings
         .prompt_template
-        .replace("{title}", title)
+        .replace("{title}", &safe_title)
         .replace("{file}", &transcript_str)
         .replace("{output}", &output_str);
 
@@ -623,6 +641,13 @@ pub async fn ai_summary_request_save<R: Runtime>(
     session_id: String,
     meeting_id: String,
 ) -> Result<String, String> {
+    // Защита от path traversal: meeting_id идёт в имя файла. Допускаем только
+    // безопасные символы (буквы/цифры/-/_), иначе "../.." увёл бы запись за пределы папки.
+    if meeting_id.is_empty()
+        || !meeting_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Некорректный идентификатор встречи".to_string());
+    }
     let app_data = app
         .path()
         .app_data_dir()
@@ -644,23 +669,38 @@ pub async fn ai_summary_request_save<R: Runtime>(
         После записи кратко скажи в чате: СОХРАНЕНО.",
         output_file.to_string_lossy()
     );
-    let payload = format!("\x1b[200~{}\x1b[201~\r", save_command);
-    state_pty.write(&session_id, payload.as_bytes())?;
+    // ВАЖНО (баг «срабатывало со второго раза», проверено pty-репродукцией):
+    // Enter нельзя склеивать со вставкой. Если слать `\x1b[200~..\x1b[201~\r`
+    // одним куском, TUI claude/codex ~30% случаев НЕ трактует `\r` как submit -
+    // текст повисает в поле, AI его не получает, ждём таймаут зря.
+    // Правильно: (1) вставить текст, (2) дать TUI обработать, (3) ОТДЕЛЬНЫМ
+    // нажатием Enter отправить. Этот паттерн в репро = 100% отправок.
+    let paste = format!("\x1b[200~{}\x1b[201~", save_command);
+    state_pty.write(&session_id, paste.as_bytes())?;
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    state_pty.write(&session_id, b"\r")?;
 
-    // Polling файла каждые 1 сек, до 180 сек.
-    // Раньше было 60 сек, но на холодном старте AI (первый запуск + ретраи запроса)
-    // ответ + write tool call не успевал за 60с -> приходилось сохранять со второго раза.
-    // 180 сек покрывают медленную первую генерацию.
-    for _ in 0..180 {
+    // Polling файла каждую 1 сек. При корректной отправке AI отвечает за секунды
+    // и цикл возвращается СРАЗУ как файл появился (мгновенно при норме).
+    // Страховка: если файла нет за ~8 сек (крайне редкий промах Enter в TUI) -
+    // ОДИН РАЗ досылаем одиночный Enter. БЕЗ повторной вставки -> текст промпта
+    // не задваивается. Безопасно: лишний Enter во время генерации - no-op в claude.
+    // 120 сек - запас на медленную генерацию длинной встречи.
+    let mut nudged = false;
+    for i in 0..120 {
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         if let Ok(content) = std::fs::read_to_string(&output_file) {
             if content.trim().len() > 30 {
                 return Ok(content);
             }
         }
+        if !nudged && i >= 8 {
+            let _ = state_pty.write(&session_id, b"\r");
+            nudged = true;
+        }
     }
 
-    Err("AI не записал файл за 3 минуты. Попробуй ещё раз или попроси AI повторить.".to_string())
+    Err("AI не записал файл за 2 минуты. Попробуй ещё раз или попроси AI повторить.".to_string())
 }
 
 /// Прочитать резюме созданное AI (через tool Write) из summaries/<meeting_id>.md.

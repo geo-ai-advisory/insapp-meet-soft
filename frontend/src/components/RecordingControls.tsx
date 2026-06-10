@@ -10,10 +10,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { toast } from 'sonner';
 
 interface RecordingControlsProps {
   isRecording: boolean;
-  barHeights: string[];
   onRecordingStop: (callApi?: boolean) => void;
   onRecordingStart: () => void;
   onTranscriptReceived: (summary: SummaryResponse) => void;
@@ -30,7 +30,6 @@ interface RecordingControlsProps {
 
 export const RecordingControls: React.FC<RecordingControlsProps> = ({
   isRecording,
-  barHeights,
   onRecordingStop,
   onRecordingStart,
   onTranscriptReceived,
@@ -77,7 +76,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         console.log('Tauri is initialized and ready, is_recording result:', result);
       } catch (error) {
         console.error('Tauri initialization error:', error);
-        alert('Failed to initialize recording. Please check the console for details.');
+        toast.error('Не удалось запустить запись', { description: 'Проверь доступ к микрофону и попробуй ещё раз.' });
       }
     };
     checkTauri();
@@ -213,7 +212,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       console.log('Recording paused successfully');
     } catch (error) {
       console.error('Failed to pause recording:', error);
-      alert('Failed to pause recording. Please check the console for details.');
+      toast.error('Не удалось поставить на паузу', { description: 'Попробуй ещё раз.' });
     } finally {
       setIsPausing(false);
     }
@@ -231,7 +230,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       console.log('Recording resumed successfully');
     } catch (error) {
       console.error('Failed to resume recording:', error);
-      alert('Failed to resume recording. Please check the console for details.');
+      toast.error('Не удалось возобновить запись', { description: 'Попробуй ещё раз.' });
     } finally {
       setIsResuming(false);
     }
@@ -472,14 +471,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                   )}
 
                   <div className="flex items-center space-x-1 mx-4">
-                    {barHeights.map((height, index) => (
+                    {[0, 1, 2].map((index) => (
                       <div
                         key={index}
-                        className={`w-1 rounded-full transition-all duration-200 ${isPaused ? 'bg-orange-500' : 'bg-red-500'
-                          }`}
+                        className={`w-1 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-red-500'} ${
+                          isRecording && !isPaused ? 'wave-bar' : 'transition-all duration-200'
+                        }`}
                         style={{
-                          height: isRecording && !isPaused ? height : '4px',
+                          height: isRecording && !isPaused ? '24px' : '4px',
                           opacity: isPaused ? 0.6 : 1,
+                          animationDelay: `${index * 0.16}s`,
                         }}
                       />
                     ))}

@@ -70,16 +70,16 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
 
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // NEW: Status setter with logging
+  // Status setter. ВАЖНО: пустые deps -> функция стабильна (не пересоздаётся
+  // при каждом poll-апдейте). Иначе contextValue менялся бы каждый тик опроса и
+  // ре-рендерил ВСЁ дерево (Sidebar + Home + панели) -> подёргивание.
+  // No-op guard: если статус и сообщение не изменились - не ре-рендерим.
   const setStatus = useCallback((status: RecordingStatus, message?: string) => {
-    console.log(`[RecordingState] Status: ${state.status} → ${status}`, message || '');
-
-    setState(prev => ({
-      ...prev,
-      status,
-      statusMessage: message,
-    }));
-  }, [state.status, state.isRecording, state.isPaused]);
+    setState(prev => {
+      if (prev.status === status && prev.statusMessage === message) return prev;
+      return { ...prev, status, statusMessage: message };
+    });
+  }, []);
 
   /**
    * Sync recording state with backend
@@ -87,18 +87,29 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
    */
   const syncWithBackend = async () => {
     try {
-      const backendState = await recordingService.getRecordingState();
+      const b = await recordingService.getRecordingState();
 
-      setState(prev => ({
-        ...prev,
-        isRecording: backendState.is_recording,
-        isPaused: backendState.is_paused,
-        isActive: backendState.is_active,
-        recordingDuration: backendState.recording_duration,
-        activeDuration: backendState.active_duration,
-      }));
-
-      console.log('[RecordingStateContext] Synced with backend:', backendState);
+      // Ре-рендерим ТОЛЬКО если что-то реально изменилось. Иначе тихий опрос
+      // дёргал бы всё дерево каждый тик (на паузе значения те же).
+      setState(prev => {
+        if (
+          prev.isRecording === b.is_recording &&
+          prev.isPaused === b.is_paused &&
+          prev.isActive === b.is_active &&
+          prev.recordingDuration === b.recording_duration &&
+          prev.activeDuration === b.active_duration
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          isRecording: b.is_recording,
+          isPaused: b.is_paused,
+          isActive: b.is_active,
+          recordingDuration: b.recording_duration,
+          activeDuration: b.active_duration,
+        };
+      });
     } catch (error) {
       console.error('[RecordingStateContext] Failed to sync with backend:', error);
       // Don't update state on error - keep current state
@@ -113,8 +124,9 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
       clearInterval(pollingIntervalRef.current);
     }
 
-    console.log('[RecordingStateContext] Starting state polling (500ms interval)');
-    pollingIntervalRef.current = setInterval(syncWithBackend, 500);
+    // 1000ms достаточно для счётчика длительности (он в секундах). 500ms давало
+    // 2 обращения к backend в секунду и лишние ре-рендеры -> подёргивание.
+    pollingIntervalRef.current = setInterval(syncWithBackend, 1000);
   };
 
   /**
