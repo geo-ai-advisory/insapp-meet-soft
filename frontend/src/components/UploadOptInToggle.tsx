@@ -39,27 +39,19 @@ export function UploadOptInToggle({ visible }: { visible: boolean }) {
 
   return (
     <label
-      className={`group flex items-center gap-2.5 cursor-pointer select-none px-3.5 py-2 rounded-xl border text-[13px] font-medium transition-colors ${
-        checked
-          ? "bg-accent border-accent-foreground/20 text-foreground hover:bg-accent/70"
-          : "bg-card border-border text-muted-foreground hover:bg-secondary"
-      }`}
+      className="group flex items-center gap-1.5 cursor-pointer select-none"
       title={
         checked
-          ? "После остановки записи транскрипция уйдёт на сервер Insapp"
-          : "Транскрипция не будет отправлена на сервер - останется только локально"
+          ? "Транскрипция уйдёт в облако Insapp"
+          : "Транскрипция останется только локально (не в облаке Insapp)"
       }
     >
       {checked ? (
-        <Cloud className="w-[15px] h-[15px] text-accent-foreground stroke-[1.75]" />
+        <Cloud className="w-4 h-4 text-primary stroke-[1.75]" />
       ) : (
-        <CloudOff className="w-[15px] h-[15px] text-muted-foreground stroke-[1.75]" />
+        <CloudOff className="w-4 h-4 text-muted-foreground stroke-[1.75]" />
       )}
-      <span>
-        Отправить в{" "}
-        <b className="font-semibold">облако Insapp</b>
-      </span>
-      {/* Тумблер-«пилюля» как в макете (свитч справа). Скрытый чекбокс держит a11y/onChange. */}
+      {/* Только иконка + рубильник (компактно), название - в подсказке */}
       <input
         type="checkbox"
         checked={checked}

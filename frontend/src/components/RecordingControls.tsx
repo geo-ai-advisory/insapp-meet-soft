@@ -348,7 +348,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   return (
     <TooltipProvider>
       <div className="flex flex-col space-y-2">
-        <div className="flex items-center space-x-2 bg-card text-foreground rounded-full shadow-lg border border-border px-4 py-2">
+        <div className="flex items-center gap-2 text-foreground">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-2">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-foreground"></div>
@@ -433,17 +433,10 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                               }
                             }}
                             disabled={isPausing || isResuming || isStopping}
-                            className={`w-10 h-10 flex items-center justify-center ${isPausing || isResuming || isStopping
-                              ? 'bg-secondary border border-border text-muted-foreground'
-                              : 'bg-card border border-border text-muted-foreground hover:border-muted-foreground/40 hover:bg-secondary hover:text-foreground'
-                              } rounded-full transition-colors relative active:scale-95`}
+                            className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg border border-border bg-card text-[13.5px] font-semibold text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors active:scale-[0.98] disabled:opacity-50"
                           >
-                            {isPaused ? <Play size={16} /> : <Pause size={16} />}
-                            {(isPausing || isResuming) && (
-                              <div className="absolute -top-8 text-muted-foreground font-medium text-xs">
-                                {isPausing ? 'Пауза...' : 'Продолжаю...'}
-                              </div>
-                            )}
+                            {isPaused ? <Play size={15} /> : <Pause size={15} />}
+                            {isPausing ? 'Пауза...' : isResuming ? 'Продолжаю...' : isPaused ? 'Продолжить' : 'Пауза'}
                           </button>
                         </TooltipTrigger>
                         <TooltipContent>
@@ -462,17 +455,10 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                               handleStopRecording();
                             }}
                             disabled={isStopping || isPausing || isResuming}
-                            className={`w-10 h-10 flex items-center justify-center ${isStopping || isPausing || isResuming
-                              ? 'bg-muted-foreground/50'
-                              : 'bg-destructive hover:opacity-90 shadow-[0_4px_14px_rgba(239,68,68,0.28)]'
-                              } rounded-full text-white transition-opacity relative active:scale-95`}
+                            className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-[13.5px] font-semibold text-white transition-colors active:scale-[0.98] ${isStopping || isPausing || isResuming ? 'bg-muted-foreground/50' : 'bg-destructive hover:bg-destructive/90'}`}
                           >
-                            <Square size={16} />
-                            {isStopping && (
-                              <div className="absolute -top-8 text-muted-foreground font-medium text-xs">
-                                Останавливаю...
-                              </div>
-                            )}
+                            <Square size={14} fill="currentColor" />
+                            {isStopping ? 'Останавливаю...' : 'Стоп'}
                           </button>
                         </TooltipTrigger>
                         <TooltipContent>

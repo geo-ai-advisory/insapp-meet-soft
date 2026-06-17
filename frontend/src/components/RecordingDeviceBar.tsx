@@ -119,10 +119,10 @@ export function RecordingDeviceBar({ isRecording = false }: { isRecording?: bool
   };
 
   return (
-    <div className="flex items-center gap-2.5 bg-card rounded-2xl shadow-md border border-border px-3 py-2.5">
-      {/* Выбор микрофона - «пилюля» c иконкой и шевроном, как в макете */}
+    <div className="flex items-center gap-3">
+      {/* Выбор микрофона - плоский inline-селект с тонкой рамкой (как в макете «нижний док») */}
       <div className="flex items-center gap-1 min-w-0">
-        <div className="flex items-center gap-2 min-w-0 rounded-xl border border-border bg-card px-3 py-2 transition-colors hover:bg-secondary focus-within:border-primary">
+        <div className="flex items-center gap-2 min-w-0 rounded-lg border border-border bg-card px-2.5 py-1.5 transition-colors hover:bg-secondary focus-within:border-primary">
           {switching === 'mic' ? (
             <Loader2 className="h-[15px] w-[15px] text-primary animate-spin shrink-0" />
           ) : (
@@ -130,13 +130,13 @@ export function RecordingDeviceBar({ isRecording = false }: { isRecording?: bool
           )}
           <Select value={micValue} onValueChange={handleMicChange} disabled={switching !== null}>
             <SelectTrigger
-              className="h-6 min-w-[170px] max-w-[240px] border-0 shadow-none bg-transparent px-0 text-[13px] font-medium text-foreground focus:ring-0 hover:bg-transparent"
+              className="h-6 min-w-[80px] max-w-[150px] border-0 shadow-none bg-transparent px-0 text-[13px] font-medium text-foreground focus:ring-0 hover:bg-transparent"
               aria-label="Выбор микрофона"
             >
-              <SelectValue placeholder="Микрофон по умолчанию" />
+              <SelectValue placeholder="Микрофон" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="default">Микрофон по умолчанию</SelectItem>
+              <SelectItem value="default">Микрофон</SelectItem>
               {inputDevices.map((device) => (
                 <SelectItem
                   key={device.name}
@@ -159,27 +159,17 @@ export function RecordingDeviceBar({ isRecording = false }: { isRecording?: bool
         </button>
       </div>
 
-      {/* Разделитель */}
-      <div className="w-px h-7 bg-border shrink-0" />
-
-      {/* Тумблер системного звука - «пилюля» с иконкой, текстом и свитчем */}
-      <label className="flex items-center gap-2.5 cursor-pointer select-none shrink-0 rounded-xl border border-border bg-card px-3 py-2 transition-colors hover:bg-secondary">
+      {/* Системный звук - только иконка + рубильник (компактно), текст в подсказке */}
+      <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0" title="Системный звук">
         <Speaker
-          className={`h-[15px] w-[15px] stroke-[1.75] transition-colors ${
-            systemOn ? 'text-muted-foreground' : 'text-border'
-          }`}
-        />
-        <span
-          className={`text-[13px] font-medium transition-colors ${
+          className={`h-4 w-4 stroke-[1.75] transition-colors ${
             systemOn ? 'text-foreground' : 'text-muted-foreground'
           }`}
-        >
-          Системный звук
-        </span>
+        />
         <Switch
           checked={systemOn}
           onCheckedChange={handleSystemToggle}
-          aria-label="Записывать системный звук"
+          aria-label="Системный звук"
         />
       </label>
     </div>

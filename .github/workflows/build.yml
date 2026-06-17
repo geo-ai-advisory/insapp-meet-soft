@@ -515,6 +515,14 @@ jobs:
           # llama-helper is for LLM inference and works fine on CPU
           Write-Host "Building llama-helper sidecar (CPU-only)..."
 
+          # FIX (VS-регрессия 06.2026): GitHub windows-runner обновил Visual Studio (2022 ->
+          # новая версия), а закэшированный (rust-cache) cmake build-dir llama-cpp-sys ссылается
+          # на исчезнувший VS2022 -> "CMake project was already configured. Skipping" + generator
+          # "Visual Studio 17 2022" not found -> panic "Failed to build llama-helper".
+          # Чистим build-dir, чтобы cmake переконфигурировал под актуальную установленную VS.
+          Get-ChildItem -Path "target" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(llama-cpp-sys|whisper-rs-sys|whisper-cpp-sys)-' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "Cleaned stale llama/whisper cmake build cache (VS regression fix)"
+
           cargo build --release -p llama-helper
 
           if ($LASTEXITCODE -ne 0) {

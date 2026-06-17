@@ -742,7 +742,7 @@ const Sidebar: React.FC = () => {
               {/* Главная */}
               <div
                 onClick={() => router.push('/')}
-                className={`${T.navRow} ${isHomePage ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] font-semibold hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--accent-foreground))]' : ''}`}
+                className={`${T.navRow} ${isHomePage && !isRecording ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] font-semibold hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--accent-foreground))]' : ''}`}
               >
                 <House className="w-[18px] h-[18px] stroke-[1.75]" />
                 <span className="flex-1">Главная</span>
@@ -752,7 +752,7 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={handleStartRecording}
                 disabled={isRecording}
-                className={`${T.navRow} w-full text-left text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 disabled:opacity-60 disabled:cursor-not-allowed`}
+                className={`${T.navRow} w-full text-left text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] disabled:cursor-not-allowed ${isRecording ? 'bg-[hsl(var(--destructive))]/10 font-semibold' : 'hover:bg-[hsl(var(--destructive))]/10'}`}
               >
                 {isRecording ? (
                   <Square className="w-[18px] h-[18px] stroke-[1.75]" />

@@ -50,7 +50,7 @@ export function TranscriptPanel({
   );
 
   return (
-    <div ref={transcriptContainerRef} className="w-full border-r border-border bg-card text-foreground flex flex-col overflow-y-auto">
+    <div ref={transcriptContainerRef} className="w-full h-full bg-card text-foreground flex flex-col min-h-0">
       {/* Title area - Sticky header */}
       <div className="sticky top-0 z-10 bg-card p-4 border-b border-border">
         <div className="flex flex-col space-y-3">
@@ -108,20 +108,20 @@ export function TranscriptPanel({
         </div>
       )}
 
-      {/* Transcript content */}
-      <div className="pb-20">
-        <div className="flex justify-center">
-          <div className="w-2/3 max-w-[750px]">
-            <VirtualizedTranscriptView
-              segments={segments}
-              isRecording={isRecording}
-              isPaused={isPaused}
-              isProcessing={isProcessingStop}
-              isStopping={isStopping}
-              enableStreaming={isRecording}
-              showConfidence={true}
-            />
-          </div>
+      {/* Transcript content - ОДИН скролл-контейнер (внутри VirtualizedTranscriptView),
+          занимает всю оставшуюся высоту -> автоскролл к последней реплике реально работает
+          (раньше была тройная вложенность скроллов и автоскролл скроллил не тот контейнер). */}
+      <div className="flex-1 min-h-0">
+        <div className="mx-auto h-full w-full max-w-[820px]">
+          <VirtualizedTranscriptView
+            segments={segments}
+            isRecording={isRecording}
+            isPaused={isPaused}
+            isProcessing={isProcessingStop}
+            isStopping={isStopping}
+            enableStreaming={isRecording}
+            showConfidence={true}
+          />
         </div>
       </div>
     </div>

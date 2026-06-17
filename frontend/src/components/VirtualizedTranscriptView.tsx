@@ -270,14 +270,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
 
     return (
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
-            {/* Recording Status Bar - Sticky at top, always visible when recording */}
-            <AnimatePresence>
-                {isRecording && (
-                    <div className="sticky top-0 z-10 bg-card pb-2">
-                        <RecordingStatusBar isPaused={isPaused} />
-                    </div>
-                )}
-            </AnimatePresence>
+            {/* Индикация записи (статус «Идёт запись» / таймер / уровень) теперь живёт в
+                НИЖНЕМ ДОКЕ (RecordingDockStatus) - дубль-бар в ленте убран, чтобы текст
+                расшифровки ничего не отвлекало (компоновка «нижний док», вариант B). */}
 
             {/* Content - add padding when recording to prevent overlap */}
             <div className={isRecording ? 'pt-2' : ''}>

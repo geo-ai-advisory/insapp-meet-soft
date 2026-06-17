@@ -25,6 +25,7 @@ import { useRouter } from 'next/navigation';
 import { UploadOptInToggle } from '@/components/UploadOptInToggle';
 import HomeDashboard from '@/components/HomeDashboard';
 import RecordingHero from '@/components/RecordingHero';
+import RecordingDockStatus from '@/components/RecordingDockStatus';
 import { SaveMeetingModal } from '@/components/SaveMeetingModal';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
@@ -274,7 +275,7 @@ export default function Home() {
           <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
             {/* Полноэкранная шапка идущей записи (орб/таймер/тип) */}
             <RecordingHero />
-            <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-hidden">
               <TranscriptPanel
                 isProcessingStop={isProcessingStop}
                 isStopping={isStopping}
@@ -287,12 +288,13 @@ export default function Home() {
                 элементы»). Теперь: устройства + облако слева, Пауза/Стоп справа -
                 единая нижняя панель, как rec-dock в макете B. */}
             <div className="flex-none border-t border-border bg-card px-6 py-3">
-                <div className="mx-auto flex max-w-[940px] flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex w-full items-center gap-x-4 gap-y-2">
+                  <div className="flex items-center gap-x-4 min-w-0">
+                    <RecordingDockStatus />
                     <RecordingDeviceBar isRecording={recordingState.isRecording} />
                     <UploadOptInToggle visible={recordingState.isRecording} />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="ml-auto flex items-center gap-2">
                     <RecordingControls
                       isRecording={recordingState.isRecording}
                       onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
