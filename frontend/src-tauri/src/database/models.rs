@@ -12,6 +12,9 @@ pub struct MeetingModel {
     /// Логин учётки-владельца. Список встреч фильтруется по текущей учётке.
     #[sqlx(default)]
     pub owner_login: Option<String>,
+    /// Тип встречи: 'internal' (Внутренняя) | 'external' (Внешняя). По умолчанию 'internal'.
+    #[sqlx(default)]
+    pub meeting_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]

@@ -1,13 +1,12 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, FileText, Settings2, PanelLeftClose, PanelLeftOpen, Calendar, House, Trash2, Mic, Square, Plus, Search as SearchIcon, Pencil, BookOpenText, X, FileUp, CircleHelp } from 'lucide-react';
+import { Settings, PanelLeftClose, PanelLeftOpen, House, Trash2, Mic, Square, Plus, Search as SearchIcon, Pencil, BookOpenText, X, FileUp, Mic2, Youtube, Moon, Sun } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
 import { ModelConfig } from '@/components/ModelSettingsModal';
-import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
@@ -30,11 +29,8 @@ import {
 } from "@/components/ui/dialog"
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 
-import { MessageToast } from '../MessageToast';
 import Logo from '../Logo';
 import Info from '../Info';
-import { ComplianceNotification } from '../ComplianceNotification';
-import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 
 interface SidebarItem {
@@ -44,12 +40,71 @@ interface SidebarItem {
   children?: SidebarItem[];
 }
 
+/* ============================================================================
+ *  Перенос утверждённого макета "Insapp Pro" (вариант B).
+ *  Цвета берём ТОЛЬКО из дизайн-токенов в globals.css через hsl(var(--token)),
+ *  чтобы и светлая, и тёмная темы были корректны без правок config/globals.
+ *    фон сайдбара          -> --card (белый/тёмный, отдельный от страницы)
+ *    бордер                -> --border
+ *    обычный текст         -> --foreground
+ *    приглушённый текст    -> --muted-foreground
+ *    ховер                 -> --secondary
+ *    активный пункт        -> --accent / --accent-foreground (мягко-синий)
+ *    "Начать запись"       -> --destructive (красный)
+ *    бейдж "скоро"         -> --secondary / --muted-foreground
+ * ========================================================================== */
+const T = {
+  sidebar: 'bg-[hsl(var(--card))] border-[hsl(var(--border))]',
+  text: 'text-[hsl(var(--foreground))]',
+  muted: 'text-[hsl(var(--muted-foreground))]',
+  faint: 'text-[hsl(var(--muted-foreground))]/70',
+  hover: 'hover:bg-[hsl(var(--secondary))]',
+  border: 'border-[hsl(var(--border))]',
+  // навигационный пункт: приглушённый -> ховер делает фон secondary и текст обычным
+  navRow:
+    'flex items-center gap-3 px-3 py-2 rounded-[10px] text-[13.5px] font-medium text-[hsl(var(--muted-foreground))] cursor-pointer transition-colors duration-150 hover:bg-[hsl(var(--secondary))] hover:text-[hsl(var(--foreground))] active:scale-[0.985]',
+  navDisabled:
+    'flex items-center gap-3 px-3 py-2 rounded-[10px] text-[13.5px] font-medium text-[hsl(var(--muted-foreground))]/60 cursor-default select-none',
+  badgeSoon:
+    'ml-auto text-[9.5px] font-semibold tracking-wide px-1.5 py-0.5 rounded-[5px] bg-[hsl(var(--secondary))] text-[hsl(var(--muted-foreground))]',
+  sectionHead:
+    'text-[11px] font-semibold tracking-[0.06em] uppercase text-[hsl(var(--muted-foreground))]/80 px-3 mb-1.5',
+  footBtn:
+    'relative w-[30px] h-[30px] rounded-lg flex items-center justify-center text-[hsl(var(--muted-foreground))] transition-colors duration-150 hover:bg-[hsl(var(--secondary))] hover:text-[hsl(var(--foreground))] active:scale-[0.92]',
+};
+
 const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
   // Версия приложения - читается из Tauri, чтобы не хардкодить и не врать после обновления
   const [appVersion, setAppVersion] = useState('');
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
+
+  // ── Переключатель темы ──────────────────────────────────────────────────
+  // В провайдере темы нет, поэтому держим её локально: класс .dark на
+  // documentElement + сохранение в localStorage. SidebarProvider не трогаем.
+  const [isDark, setIsDark] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('insapp-meet-theme');
+      const root = document.documentElement;
+      const dark = saved ? saved === 'dark' : root.classList.contains('dark');
+      root.classList.toggle('dark', dark);
+      setIsDark(dark);
+    } catch { /* localStorage может быть недоступен */ }
+  }, []);
+  const toggleTheme = useCallback(() => {
+    setIsDark(prev => {
+      const next = !prev;
+      try {
+        document.documentElement.classList.toggle('dark', next);
+        localStorage.setItem('insapp-meet-theme', next ? 'dark' : 'light');
+      } catch { /* no-op */ }
+      console.log('[insapp-meet] sidebar: переключение темы', next ? 'dark' : 'light');
+      return next;
+    });
+  }, []);
+
   const {
     currentMeeting,
     setCurrentMeeting,
@@ -64,6 +119,18 @@ const Sidebar: React.FC = () => {
     setMeetings,
     serverAddress
   } = useSidebar();
+
+  // Коллапс с логом (логику коллапса берём из провайдера, лишь оборачиваем)
+  const handleToggleCollapse = useCallback(() => {
+    console.log('[insapp-meet] sidebar: коллапс', isCollapsed ? 'развернуть' : 'свернуть');
+    toggleCollapse();
+  }, [isCollapsed, toggleCollapse]);
+
+  // Старт записи с логом (вся логика - в провайдере)
+  const handleStartRecording = useCallback(() => {
+    console.log('[insapp-meet] sidebar: старт записи');
+    handleRecordingToggle();
+  }, [handleRecordingToggle]);
 
   // Get recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
@@ -101,15 +168,6 @@ const Sidebar: React.FC = () => {
       setExpandedFolders(newExpanded);
     }
   }, [expandedFolders]);
-
-  // useEffect(() => {
-  //   if (settingsSaveSuccess !== null) {
-  //     const timer = setTimeout(() => {
-  //       setSettingsSaveSuccess(null);
-  //     }, 3000);
-  //   }
-  // }, [settingsSaveSuccess]);
-
 
   const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
 
@@ -452,6 +510,16 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
+  // Открыть встречу из бокового списка (навигация + лог + трекинг)
+  const openMeeting = (item: SidebarItem) => {
+    console.log('[insapp-meet] sidebar: открытие встречи', item.id);
+    setCurrentMeeting({ id: item.id, title: item.title });
+    const basePath = item.id.startsWith('intro-call') ? '/' :
+      item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
+    router.push(basePath);
+  };
+
+  // ── Свёрнутый сайдбар: вертикальный ряд иконок ───────────────────────────
   const renderCollapsedIcons = () => {
     if (!isCollapsed) return null;
 
@@ -459,94 +527,87 @@ const Sidebar: React.FC = () => {
     const isMeetingPage = pathname?.includes('/meeting-details');
     const isSettingsPage = pathname === '/settings';
 
+    const railBtn = (active: boolean) =>
+      `p-2 rounded-lg transition-colors duration-150 ${active
+        ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]'
+        : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--secondary))] hover:text-[hsl(var(--foreground))]'}`;
+
     return (
       <TooltipProvider>
-        <div className="flex flex-col items-center space-y-4 mt-4">
+        <div className="flex flex-col items-center space-y-3 mt-3">
           <Logo isCollapsed={isCollapsed} />
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
+              <button onClick={() => router.push('/')} className={railBtn(!!isHomePage)}>
                 <House className="w-5 h-5 stroke-[1.75]" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Главная</p>
-            </TooltipContent>
+            <TooltipContent side="right"><p>Главная</p></TooltipContent>
           </Tooltip>
 
+          {/* Начать запись - красная акцентная кнопка */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={handleRecordingToggle}
+                onClick={handleStartRecording}
                 disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
+                className={`p-2 rounded-full transition-colors duration-150 shadow-sm text-white ${isRecording ? 'bg-[hsl(var(--brand-red))] cursor-not-allowed' : 'bg-[hsl(var(--brand-red))] hover:bg-[hsl(var(--brand-red-hover))]'}`}
               >
-                {isRecording ? (
-                  <Square className="w-5 h-5 text-white" />
-                ) : (
-                  <Mic className="w-5 h-5 text-white" />
-                )}
+                {isRecording ? <Square className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>{isRecording ? "Идёт запись..." : "Начать запись"}</p>
-            </TooltipContent>
+            <TooltipContent side="right"><p>{isRecording ? "Идёт запись..." : "Начать запись"}</p></TooltipContent>
           </Tooltip>
 
-          {/* Заметки встреч - основной раздел приложения, сверху перед import.
-              Подсвечивается blue при активной странице митинга, как primary navigation. */}
+          {/* Загрузить запись */}
+          {betaFeatures.importAndRetranscribe && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={() => openImportDialog()} className={railBtn(false)}>
+                  <FileUp className="w-5 h-5 stroke-[1.75]" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right"><p>Загрузить запись</p></TooltipContent>
+            </Tooltip>
+          )}
+
+          {/* Встречи - раскрывает сайдбар и папку */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 onClick={() => {
-                  if (isCollapsed) toggleCollapse();
+                  if (isCollapsed) handleToggleCollapse();
                   toggleFolder('meetings');
                 }}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100 text-gray-600'
-                  }`}
+                className={railBtn(!!isMeetingPage)}
               >
-                <BookOpenText className={`w-5 h-5 stroke-[1.75] ${isMeetingPage ? 'text-blue-600' : 'text-gray-600'}`} />
+                <BookOpenText className="w-5 h-5 stroke-[1.75]" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Заметки встреч</p>
-            </TooltipContent>
+            <TooltipContent side="right"><p>Встречи</p></TooltipContent>
           </Tooltip>
 
-          {betaFeatures.importAndRetranscribe && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-gray-100 text-gray-600"
-                >
-                  <FileUp className="w-5 h-5 stroke-[1.75]" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Загрузить аудио</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
+          <div className={`w-6 border-t ${T.border} my-1`} />
 
+          {/* Настройки */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/settings')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
-                <Settings2 className="w-5 h-5 stroke-[1.75]" />
+              <button onClick={() => router.push('/settings')} className={railBtn(!!isSettingsPage)}>
+                <Settings className="w-5 h-5 stroke-[1.75]" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Настройки</p>
-            </TooltipContent>
+            <TooltipContent side="right"><p>Настройки</p></TooltipContent>
+          </Tooltip>
+
+          {/* Тема */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={toggleTheme} className={railBtn(false)} aria-label="Светлая / Тёмная">
+                {isDark ? <Sun className="w-5 h-5 stroke-[1.75]" /> : <Moon className="w-5 h-5 stroke-[1.75]" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right"><p>Светлая / Тёмная</p></TooltipContent>
           </Tooltip>
 
           <Info isCollapsed={isCollapsed} />
@@ -554,17 +615,11 @@ const Sidebar: React.FC = () => {
           {/* Проверить обновление вручную (авто-проверка идёт при запуске) */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                onClick={() => triggerUpdateCheck()}
-                className="p-2 rounded-lg transition-colors duration-150 hover:bg-gray-100 text-gray-600"
-                aria-label="Проверить обновление"
-              >
+              <button onClick={() => triggerUpdateCheck()} className={railBtn(false)} aria-label="Проверить обновление">
                 <DownloadCloud className="w-5 h-5 stroke-[1.75]" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Проверить обновление</p>
-            </TooltipContent>
+            <TooltipContent side="right"><p>Проверить обновление</p></TooltipContent>
           </Tooltip>
 
           {/* Профиль пользователя - имя залогиненного + выход/вход */}
@@ -580,282 +635,217 @@ const Sidebar: React.FC = () => {
     return searchResults.find(result => result.id === itemId);
   };
 
-  const renderItem = (item: SidebarItem, depth = 0) => {
-    const isExpanded = expandedFolders.has(item.id);
-    const paddingLeft = `${depth * 12 + 12}px`;
-    const isActive = item.type === 'file' && currentMeeting?.id === item.id;
+  // ── Пункт списка встреч (вариант B): точка + название, активный = мягко-синий
+  //    с левой полоской, при наведении - карандаш (переименовать) и корзина (удалить).
+  const renderMeetingItem = (item: SidebarItem) => {
+    const isActive = currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
-
-    // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
     const hasTranscriptMatch = !!matchingResult;
-
-    if (isCollapsed) return null;
 
     return (
       <div key={item.id}>
         <div
-          className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
-            ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
-              hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
-            } cursor-pointer`
+          onClick={() => openMeeting(item)}
+          className={`relative group flex items-center gap-[9px] px-[11px] py-[7px] rounded-lg text-[12.5px] cursor-pointer transition-colors duration-150 ${isActive
+            ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] font-semibold'
+            : `text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--secondary))] hover:text-[hsl(var(--foreground))] ${hasTranscriptMatch ? 'bg-[hsl(var(--accent))]/40' : ''}`
             }`}
-          style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
-          onClick={() => {
-            if (item.type === 'folder') {
-              toggleFolder(item.id);
-            } else {
-              setCurrentMeeting({ id: item.id, title: item.title });
-              const basePath = item.id.startsWith('intro-call') ? '/' :
-                item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
-              router.push(basePath);
-            }
-          }}
         >
-          {item.type === 'folder' ? (
-            <>
-              {item.id === 'meetings' ? (
-                <Calendar className="w-4 h-4 mr-2" />
-              ) : item.id === 'notes' ? (
-                <Calendar className="w-4 h-4 mr-2" />
-              ) : null}
-              <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
-              <div className="ml-auto">
-                {isExpanded ? (
-                  <ChevronDown className="w-4 h-4 text-gray-500" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-500" />
-                )}
-              </div>
-              {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-blue-500 animate-pulse">Ищу...</span>
-              )}
-            </>
-          ) : (
-            <div className="flex flex-col w-full">
-              <div className="flex items-center w-full">
-                {isMeetingItem ? (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
-                    <FileText className="w-3.5 h-3.5 text-gray-600" />
-                  </div>
-                ) : (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
-                    <Plus className="w-3.5 h-3.5 text-blue-600" />
-                  </div>
-                )}
-                <span className="flex-1 break-words">{item.title}</span>
-                {isMeetingItem && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditStart(item.id, item.title);
-                      }}
-                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
-                      aria-label="Изменить название встречи"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteModalState({ isOpen: true, itemId: item.id });
-                      }}
-                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
-                      aria-label="Удалить встречу"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
+          {/* левая акцент-полоска у активного */}
+          {isActive && (
+            <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-[3px] bg-[hsl(var(--accent-foreground))]" />
+          )}
 
-              {/* Show transcript match snippet if available */}
-              {hasTranscriptMatch && (
-                <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
-                  <span className="font-medium text-yellow-600">Совпадение:</span> {matchingResult.matchContext}
-                </div>
-              )}
+          {isMeetingItem ? (
+            <span className={`w-1.5 h-1.5 rounded-full flex-none ${isActive ? 'bg-[hsl(var(--accent-foreground))]' : 'bg-[hsl(var(--muted-foreground))]/60'}`} />
+          ) : (
+            <span className="flex-none flex items-center justify-center w-5 h-5 rounded-full bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">
+              <Plus className="w-3 h-3" />
+            </span>
+          )}
+
+          <span className="flex-1 truncate">{item.title}</span>
+
+          {isMeetingItem && (
+            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <button
+                onClick={(e) => { e.stopPropagation(); handleEditStart(item.id, item.title); }}
+                className="p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:bg-[hsl(var(--accent))]/60 flex-shrink-0"
+                aria-label="Изменить название встречи"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setDeleteModalState({ isOpen: true, itemId: item.id }); }}
+                className="p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 flex-shrink-0"
+                aria-label="Удалить встречу"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
         </div>
-        {item.type === 'folder' && isExpanded && item.children && (
-          <div className="ml-1">
-            {item.children.map(child => renderItem(child, depth + 1))}
+
+        {/* сниппет совпадения при поиске по транскрипту */}
+        {hasTranscriptMatch && (
+          <div className="mt-1 ml-[26px] text-[11px] text-[hsl(var(--muted-foreground))] bg-[hsl(var(--accent))]/30 p-1.5 rounded border border-[hsl(var(--border))] line-clamp-2">
+            <span className="font-medium text-[hsl(var(--accent-foreground))]">Совпадение:</span> {matchingResult!.matchContext}
           </div>
         )}
       </div>
     );
   };
 
+  // Все встречи (плоский список) из всех folder-узлов sidebarItems
+  const meetingChildren = filteredSidebarItems
+    .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
+    .flatMap(item => item.children!);
+
+  const isHomePage = pathname === '/';
+
   return (
     <div className="fixed top-0 left-0 h-screen z-40">
-      {/* Floating collapse button */}
-      <button
-        onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 p-1 bg-white hover:bg-gray-100 rounded-full shadow-lg border"
-        style={{ transform: 'translateX(50%)' }}
-      >
-        {isCollapsed ? (
-          <PanelLeftOpen className="w-6 h-6" />
-        ) : (
-          <PanelLeftClose className="w-6 h-6" />
-        )}
-      </button>
+      {/* Кнопка-свёртка убрана: артефакт старого Meetily (Geo: «старое сворачивание,
+          которое не нужно»). Сайдбар всегда развёрнут, как в макете Insapp Pro. */}
 
       <div
-        className={`h-screen bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'
+        className={`h-screen ${T.sidebar} border-r shadow-sm flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-[232px]'
           }`}
       >
-        {/*  Header with traffic light spacing */}
-        <div className="flex-shrink-0 h-22 flex items-center">
-
-          {/* Title container */}
-
-
-
-          <div className="flex-1">
-            {!isCollapsed && (
-              <div className="p-3">
-                {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
-                  <span>Meetily</span>
-                </span> */}
-                <Logo isCollapsed={isCollapsed} />
-
-                <div className="relative mb-1">
-                  <InputGroup >
-                    <InputGroupInput placeholder='Поиск по встречам...' value={searchQuery}
-                      onChange={(e) => handleSearchChange(e.target.value)}
-                    />
-                    <InputGroupAddon>
-                      <SearchIcon />
-                    </InputGroupAddon>
-                    {searchQuery &&
-                      <InputGroupAddon align={'inline-end'}>
-                        <InputGroupButton
-                          onClick={() => handleSearchChange('')}
-                        >
-                          <X />
-                        </InputGroupButton>
-                      </InputGroupAddon>
-                    }
-                  </InputGroup>
-                </div>
-              </div>
-            )}
+        {/* Свёрнутый режим - вертикальный ряд иконок */}
+        {isCollapsed && (
+          <div className="flex-1 flex flex-col">
+            {renderCollapsedIcons()}
           </div>
-        </div>
+        )}
 
-        {/* Main content - scrollable area */}
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Fixed navigation items */}
-          <div className="flex-shrink-0">
-            {!isCollapsed && (
+        {/* ── Развёрнутый сайдбар ── */}
+        {!isCollapsed && (
+          <>
+            {/* Бренд + поиск (отступ под traffic-light на macOS) */}
+            <div className="flex-shrink-0 px-2 pt-7 pb-2">
+              <div className="flex items-center gap-2 px-2 pb-3.5">
+                <Logo isCollapsed={isCollapsed} />
+                <span className="text-[9.5px] font-bold tracking-wider text-[hsl(var(--accent-foreground))] bg-[hsl(var(--accent))] px-1.5 py-0.5 rounded-[5px]">
+                  PRO
+                </span>
+              </div>
+
+              {/* Поиск из сайдбара убран: в макете Insapp Pro поиск только в верхней
+                  панели главного экрана (был дубль). Фильтрация списка встреч остаётся
+                  доступной через верхний поиск. */}
+            </div>
+
+            {/* ── Навигация ── */}
+            <nav className="flex-shrink-0 px-2 flex flex-col gap-px">
+              {/* Главная */}
               <div
                 onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+                className={`${T.navRow} ${isHomePage ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] font-semibold hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--accent-foreground))]' : ''}`}
               >
-                <House className="w-4 h-4 mr-2" />
-                <span>Главная</span>
+                <House className="w-[18px] h-[18px] stroke-[1.75]" />
+                <span className="flex-1">Главная</span>
               </div>
-            )}
-          </div>
 
-          {/* Content area */}
-          <div className="flex-1 flex flex-col min-h-0">
-            {renderCollapsedIcons()}
-            {/* Meeting Notes folder header - fixed */}
-            {!isCollapsed && (
-              <div className="flex-shrink-0">
-                {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
-                  <div key={item.id}>
-                    <div
-                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
-                    >
-                      <BookOpenText className="w-4 h-4 mr-2 text-gray-600" />
-                      <span className="text-gray-700">{item.title}</span>
-                      {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-blue-500 animate-pulse">Ищу...</span>
-                      )}
-                    </div>
+              {/* Начать запись - красный акцент */}
+              <button
+                onClick={handleStartRecording}
+                disabled={isRecording}
+                className={`${T.navRow} w-full text-left text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 disabled:opacity-60 disabled:cursor-not-allowed`}
+              >
+                {isRecording ? (
+                  <Square className="w-[18px] h-[18px] stroke-[1.75]" />
+                ) : (
+                  <span className="w-[18px] h-[18px] flex items-center justify-center">
+                    <span className="w-3 h-3 rounded-full bg-[hsl(var(--destructive))]" />
+                  </span>
+                )}
+                <span className="flex-1">{isRecording ? 'Идёт запись...' : 'Начать запись'}</span>
+              </button>
+
+              {/* Загрузить запись */}
+              {betaFeatures.importAndRetranscribe && (
+                <button onClick={() => openImportDialog()} className={`${T.navRow} w-full text-left`}>
+                  <FileUp className="w-[18px] h-[18px] stroke-[1.75]" />
+                  <span className="flex-1">Загрузить запись</span>
+                </button>
+              )}
+
+              {/* Диктовка - заглушка "скоро" (не навигирует) */}
+              <div className={T.navDisabled} aria-disabled="true">
+                <Mic2 className="w-[18px] h-[18px] stroke-[1.75]" />
+                <span>Диктовка</span>
+                <span className={T.badgeSoon}>скоро</span>
+              </div>
+
+              {/* YouTube - заглушка "скоро" (не навигирует) */}
+              <div className={T.navDisabled} aria-disabled="true">
+                <Youtube className="w-[18px] h-[18px] stroke-[1.75]" />
+                <span>YouTube</span>
+                <span className={T.badgeSoon}>скоро</span>
+              </div>
+            </nav>
+
+            {/* ── Секция "Встречи" ── */}
+            <div className="flex-1 flex flex-col min-h-0 mt-3.5 px-2">
+              <div className={`${T.sectionHead} flex items-center`}>
+                <span>Встречи</span>
+                {searchQuery && isSearching && (
+                  <span className="ml-2 normal-case tracking-normal text-[hsl(var(--accent-foreground))] animate-pulse">Ищу...</span>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 flex flex-col gap-px">
+                {meetingChildren.length > 0 ? (
+                  meetingChildren.map(child => renderMeetingItem(child))
+                ) : (
+                  <div className="px-[11px] py-2 text-[12px] text-[hsl(var(--muted-foreground))]/70">
+                    {searchQuery ? 'Ничего не найдено' : 'Пока нет встреч'}
                   </div>
-                ))}
+                )}
               </div>
-            )}
-
-            {/* Scrollable meeting items */}
-            {!isCollapsed && (
-              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
-                {filteredSidebarItems
-                  .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
-                  .map(item => (
-                    <div key={`${item.id}-children`} className="mx-3">
-                      {item.children!.map(child => renderItem(child, 1))}
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer - единая дизайн-система через <Button>:
-            - destructive (запись) - bg-red
-            - secondary (загрузить/настройки) - outline gray
-            Все h-9, одинаковые иконки. */}
-        {!isCollapsed && (
-          <div className="flex-shrink-0 p-3 border-t border-gray-100 space-y-1.5">
-            <Button
-              variant="destructive"
-              onClick={handleRecordingToggle}
-              disabled={isRecording}
-              className="w-full"
-            >
-              {isRecording ? <Square /> : <Mic />}
-              {isRecording ? "Идёт запись..." : "Начать запись"}
-            </Button>
-
-            {betaFeatures.importAndRetranscribe && (
-              <Button
-                variant="secondary"
-                onClick={() => openImportDialog()}
-                className="w-full"
-              >
-                <FileUp />
-                Загрузить аудио
-              </Button>
-            )}
-
-            <Button
-              variant="secondary"
-              onClick={() => router.push('/settings')}
-              className="w-full"
-            >
-              <Settings2 />
-              Настройки
-            </Button>
-
-            <Info isCollapsed={isCollapsed} />
-
-            {/* Проверить обновление вручную (авто-проверка идёт при запуске) */}
-            <Button
-              variant="secondary"
-              onClick={() => triggerUpdateCheck()}
-              className="w-full"
-            >
-              <DownloadCloud />
-              Проверить обновление
-            </Button>
-
-            {/* Профиль пользователя - имя залогиненного + выход/вход */}
-            <div className="w-full pt-1 border-t border-gray-100 mt-1">
-              <UserProfileButton collapsed={false} />
             </div>
 
-            <div className="w-full flex items-center justify-center pt-1 text-xs text-gray-400">
-              {appVersion ? `v${appVersion}` : ''}
+            {/* ── Подвал: профиль + иконки (настройки/тема/обновление) в ОДНУ строку (как макет) ── */}
+            <div className={`flex-shrink-0 mt-auto px-2 pb-3 pt-2 border-t ${T.border}`}>
+              <TooltipProvider>
+                <div className="flex items-center gap-1">
+                  {/* Профиль (аватар-инициалы + имя) */}
+                  <div className="min-w-0 flex-1">
+                    <UserProfileButton collapsed={false} />
+                  </div>
+                  {/* Иконки управления - справа, в той же строке (3 шт, как в макете) */}
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={() => router.push('/settings')} className={T.footBtn} aria-label="Настройки">
+                          <Settings className="w-[17px] h-[17px] stroke-[1.75]" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top"><p>Настройки</p></TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={toggleTheme} className={T.footBtn} aria-label="Светлая / Тёмная">
+                          {isDark ? <Sun className="w-[17px] h-[17px] stroke-[1.75]" /> : <Moon className="w-[17px] h-[17px] stroke-[1.75]" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top"><p>Светлая / Тёмная</p></TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={() => triggerUpdateCheck()} className={T.footBtn} aria-label="Проверить обновление">
+                          <DownloadCloud className="w-[17px] h-[17px] stroke-[1.75]" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top"><p>Проверить обновление</p></TooltipContent>
+                    </Tooltip>
+                  </div>
+                </div>
+              </TooltipProvider>
             </div>
-          </div>
+          </>
         )}
       </div>
 
@@ -879,7 +869,7 @@ const Sidebar: React.FC = () => {
             <h3 className="text-lg font-semibold mb-4">Изменить название встречи</h3>
             <div className="space-y-4">
               <div>
-                <label htmlFor="meeting-title" className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="meeting-title" className="block text-sm font-medium text-[hsl(var(--foreground))] mb-2">
                   Название встречи
                 </label>
                 <input
@@ -894,7 +884,7 @@ const Sidebar: React.FC = () => {
                       handleEditCancel();
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[hsl(var(--border))] rounded-md bg-[hsl(var(--card))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:border-transparent"
                   placeholder="Введите название встречи"
                   autoFocus
                 />
@@ -904,13 +894,13 @@ const Sidebar: React.FC = () => {
           <DialogFooter>
             <button
               onClick={handleEditCancel}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[hsl(var(--foreground))] bg-[hsl(var(--secondary))] hover:bg-[hsl(var(--secondary))]/80 rounded-md transition-colors"
             >
               Отмена
             </button>
             <button
               onClick={handleEditConfirm}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-[hsl(var(--primary))] hover:bg-[hsl(var(--brand-blue-hover))] rounded-md transition-colors"
             >
               Сохранить
             </button>

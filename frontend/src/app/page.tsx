@@ -23,14 +23,48 @@ import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { UploadOptInToggle } from '@/components/UploadOptInToggle';
+import HomeDashboard from '@/components/HomeDashboard';
+import RecordingHero from '@/components/RecordingHero';
+import { SaveMeetingModal } from '@/components/SaveMeetingModal';
+import { invoke } from '@tauri-apps/api/core';
+import { appDataDir } from '@tauri-apps/api/path';
+import { Loader2 } from 'lucide-react';
+
+/** Чистый экран обработки после остановки записи: спиннер + статус.
+ *  Показывается между остановкой и открытием готовой встречи - ВМЕСТО старого
+ *  realtime-вида транскрипта (баг «беспонтовый промежуточный экран от старой версии»). */
+function ProcessingScreen({ status }: { status: RecordingStatus }) {
+  const text =
+    status === RecordingStatus.SAVING ? 'Сохраняю встречу...'
+      : status === RecordingStatus.UPLOADING_TO_SERVER ? 'Отправляю в облако Insapp...'
+        : 'Готовлю транскрипт встречи...';
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center bg-background px-8 text-center">
+      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      </div>
+      <h2 className="mb-1.5 text-lg font-semibold text-foreground">{text}</h2>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        Это займёт несколько секунд - встреча откроется автоматически.
+      </p>
+    </div>
+  );
+}
 
 export default function Home() {
   // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  // Окно «Сохранить встречу» при нажатии «Стоп» (как #bStopModal в макете).
+  // DEV: ?dev_screen=save открывает окно сразу - для проверки вёрстки в браузере.
+  const [showSaveModal, setShowSaveModal] = useState(
+    typeof window !== 'undefined'
+    && process.env.NODE_ENV === 'development'
+    && new URLSearchParams(window.location.search).get('dev_screen') === 'save'
+  );
 
   // Use contexts for state management
-  const { meetingTitle } = useTranscripts();
+  const { meetingTitle, setMeetingTitle } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
@@ -38,7 +72,7 @@ export default function Home() {
   const { status, isStopping, isProcessing, isSaving } = recordingState;
 
   // Hooks
-  const { hasMicrophone } = usePermissionCheck();
+  usePermissionCheck();
   const { setIsMeetingActive, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
@@ -66,6 +100,14 @@ export default function Home() {
   useEffect(() => {
     // Track page view
     Analytics.trackPageView('home');
+  }, []);
+
+  // Пилюля-индикатор (отдельное окно) просит показать окно «Сохранить встречу» -
+  // тот же путь, что кнопка «Стоп» в приложении. Слушатель пилюли в useRecordingStop
+  // дёргает этот глобальный колбэк.
+  useEffect(() => {
+    (window as any).requestSaveMeeting = () => setShowSaveModal(true);
+    return () => { delete (window as any).requestSaveMeeting; };
   }, []);
 
   // Startup recovery check
@@ -171,16 +213,44 @@ export default function Home() {
     }
   };
 
+  // «Сохранить» в окне сохранения: применяем название, делаем РЕАЛЬНУЮ остановку записи
+  // (тот же путь, что у кнопки «Стоп»), затем пост-обработка и сохранение встречи.
+  const handleConfirmSave = async (name: string, type: 'in' | 'out') => {
+    setShowSaveModal(false);
+    setIsStopping(true);
+    setMeetingTitle(name);
+    try {
+      const dataDir = await appDataDir();
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      await invoke('stop_recording', { args: { save_path: `${dataDir}/recording-${ts}.wav` } });
+    } catch (e) {
+      console.error('[insapp-meet] save-modal: ошибка реальной остановки', e);
+    }
+    // Имя и тип передаём ЯВНО (React state setMeetingTitle не успевает примениться
+    // до сохранения): overrideName перебивает дефолтное backend-имя, тип уходит в БД и на сервер.
+    handleRecordingStop(true, name, type === 'out' ? 'external' : 'internal');
+  };
+
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
+  // DEV: показать экран записи в браузерной dev-версии (?dev_screen=recording) для
+  // вёрстки без реальной записи. В собранном приложении (Tauri) не влияет.
+  const devForceRec = typeof window !== 'undefined'
+    && process.env.NODE_ENV === 'development'
+    && new URLSearchParams(window.location.search).get('dev_screen') === 'recording';
+  const isRecScreen = recordingState.isRecording || devForceRec;
+
+  // Главная-дашборд показывается в простое. Во время записи/обработки/сохранения -
+  // экран записи. Логику записи это не трогает.
+  const showHome = !isRecScreen
+    && status !== RecordingStatus.PROCESSING_TRANSCRIPTS
+    && status !== RecordingStatus.SAVING
+    && status !== RecordingStatus.STOPPING
+    && status !== RecordingStatus.UPLOADING_TO_SERVER;
+
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.18, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
-    >
+    <motion.div className="flex flex-col h-screen bg-background">
       {/* All Modals supported*/}
       <SettingsModals
         modals={modals}
@@ -198,35 +268,38 @@ export default function Home() {
         onLoadPreview={loadMeetingTranscripts}
       />
       <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          isProcessingStop={isProcessingStop}
-          isStopping={isStopping}
-          showModal={showModal}
-        />
+        {showHome ? (
+          <HomeDashboard />
+        ) : isRecScreen ? (
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            {/* Полноэкранная шапка идущей записи (орб/таймер/тип) */}
+            <RecordingHero />
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <TranscriptPanel
+                isProcessingStop={isProcessingStop}
+                isStopping={isStopping}
+                showModal={showModal}
+              />
+            </div>
 
-        {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-        {(hasMicrophone || isRecording) &&
-          status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
-          status !== RecordingStatus.SAVING && (
-            <div className="fixed bottom-12 left-0 right-0 z-10">
-              <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
-                style={{
-                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-                }}
-              >
-                <div className="w-2/3 max-w-[750px] flex flex-col items-center gap-3">
-                  {/* Выбор микрофона + тумблер системного звука. Показываем всегда -
-                      и до старта, и во время записи (можно переключить устройство
-                      на лету, если, например, наушники отвалились). */}
-                  <RecordingDeviceBar isRecording={recordingState.isRecording} />
-                  <div className="bg-white rounded-full shadow-lg flex items-center">
+            {/* Нижний док записи - В ПОТОКЕ под транскриптом (не fixed-overlay, как было).
+                Раньше панель плавала поверх ленты и перекрывала её (баг «перекрывающиеся
+                элементы»). Теперь: устройства + облако слева, Пауза/Стоп справа -
+                единая нижняя панель, как rec-dock в макете B. */}
+            <div className="flex-none border-t border-border bg-card px-6 py-3">
+                <div className="mx-auto flex max-w-[940px] flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <RecordingDeviceBar isRecording={recordingState.isRecording} />
+                    <UploadOptInToggle visible={recordingState.isRecording} />
+                  </div>
+                  <div className="flex items-center gap-2">
                     <RecordingControls
                       isRecording={recordingState.isRecording}
                       onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
                       onRecordingStart={handleRecordingStart}
-                      onTranscriptReceived={() => { }} // Not actually used by RecordingControls
+                      onTranscriptReceived={() => { }}
                       onStopInitiated={() => setIsStopping(true)}
+                      onRequestStop={() => setShowSaveModal(true)}
                       onTranscriptionError={(message) => {
                         showModal('errorAlert', message);
                       }}
@@ -236,13 +309,14 @@ export default function Home() {
                       meetingName={meetingTitle}
                     />
                   </div>
-                  {/* Чекбокс «Отправить в облако Insapp» - под кнопкой Стоп,
-                      видим только когда идёт запись */}
-                  <UploadOptInToggle visible={recordingState.isRecording} />
                 </div>
               </div>
-            </div>
-          )}
+          </div>
+        ) : (
+          /* Пост-стоп: чистый лоадер вместо старого realtime-вида (баг 1).
+             Встреча откроется автоматически (router.push в useRecordingStop). */
+          <ProcessingScreen status={status} />
+        )}
 
         {/* Status Overlays - Processing, Saving, Uploading */}
         <StatusOverlays
@@ -252,6 +326,19 @@ export default function Home() {
           sidebarCollapsed={sidebarCollapsed}
         />
       </div>
+
+      {/* Окно «Сохранить встречу» - открывается по «Стоп», запускает остановку+сохранение */}
+      <SaveMeetingModal
+        open={showSaveModal}
+        defaultName={
+          meetingTitle && meetingTitle !== '+ New Call'
+            ? meetingTitle
+            : `Встреча ${new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}, ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`
+        }
+        willUpload={typeof window !== 'undefined' ? sessionStorage.getItem('insapp_upload_to_cloud') !== 'false' : true}
+        onCancel={() => setShowSaveModal(false)}
+        onConfirm={handleConfirmSave}
+      />
     </motion.div>
   );
 }

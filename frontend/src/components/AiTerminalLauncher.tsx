@@ -96,8 +96,8 @@ export function AiTerminalLauncher({
         clickable = true;
         break;
       case "disabled":
-        bg = "bg-gray-50 hover:bg-gray-100 border-gray-200";
-        textColor = "text-gray-600";
+        bg = "bg-background hover:bg-secondary border-border";
+        textColor = "text-muted-foreground";
         icon = <CloudOff className="w-4 h-4" />;
         tooltip = "Транскрипт не отправлялся - клик чтобы отправить";
         clickable = true;
@@ -147,7 +147,7 @@ export function AiTerminalLauncher({
       {/* Terminal panel */}
       {terminalState !== "closed" && (
         <div
-          className="fixed inset-y-0 right-0 z-40 w-full max-w-2xl border-l border-gray-200 shadow-2xl bg-white flex flex-col"
+          className="fixed inset-y-0 right-0 z-40 w-full max-w-2xl border-l border-border shadow-2xl bg-card flex flex-col"
           style={{ display: terminalState === "minimized" ? "none" : "flex" }}
         >
           <TerminalPanel
@@ -167,12 +167,12 @@ export function AiTerminalLauncher({
       {terminalState === "minimized" && (
         <button
           onClick={() => setTerminalState("open")}
-          className="fixed bottom-6 right-6 z-30 flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full shadow-lg hover:shadow-xl transition-shadow"
+          className="fixed bottom-6 right-6 z-30 flex items-center gap-2 px-4 py-2.5 bg-card border border-border rounded-full shadow-lg hover:shadow-xl transition-shadow"
           title="Развернуть AI-резюме"
         >
           <Sparkles className="w-4 h-4 text-blue-600 stroke-[1.75]" />
-          <span className="text-sm font-medium text-gray-900">AI-резюме работает</span>
-          <ChevronUp className="w-3.5 h-3.5 text-gray-500 stroke-[1.75]" />
+          <span className="text-sm font-medium text-foreground">AI-резюме работает</span>
+          <ChevronUp className="w-3.5 h-3.5 text-muted-foreground stroke-[1.75]" />
         </button>
       )}
     </TooltipProvider>

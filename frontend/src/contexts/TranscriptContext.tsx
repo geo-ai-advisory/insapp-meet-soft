@@ -338,7 +338,12 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
+        // DEV-веб без Tauri-движка: listen() недоступен - это ожидаемо, не пугаем alert'ом.
+        // В собранном приложении (__TAURI_INTERNALS__ есть) alert остаётся как раньше.
+        const isTauriRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+        if (isTauriRuntime) {
+          alert('Failed to setup transcript listener. Check console for details.');
+        }
       }
     };
 

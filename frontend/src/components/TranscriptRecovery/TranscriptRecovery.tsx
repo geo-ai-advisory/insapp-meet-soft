@@ -82,7 +82,7 @@ export function TranscriptRecovery({
     setIsRecovering(true);
     try {
       const result = await onRecover(selectedMeetingId);
-      console.log('Recovery successful:', result);
+      console.log('[insapp-meet] popup: встреча восстановлена', result);
       onClose();
     } catch (error) {
       console.error('Recovery failed:', error);
@@ -116,9 +116,9 @@ export function TranscriptRecovery({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl h-[80vh] flex flex-col p-0">
+      <DialogContent className="max-w-4xl h-[80vh] flex flex-col p-0 bg-card text-card-foreground border-border rounded-2xl">
         <DialogHeader className="px-6 pt-6">
-          <DialogTitle className="text-2xl">Recover Interrupted Meetings</DialogTitle>
+          <DialogTitle className="text-2xl tracking-tight text-foreground">Recover Interrupted Meetings</DialogTitle>
           <DialogDescription>
             We found {recoverableMeetings.length} meeting{recoverableMeetings.length !== 1 ? 's' : ''} that {recoverableMeetings.length !== 1 ? 'were' : 'was'} interrupted. Select a meeting to preview and recover it.
           </DialogDescription>
@@ -155,11 +155,11 @@ export function TranscriptRecovery({
                       </div>
                       {meeting.folderPath ? (
                         <span title="Audio available">
-                          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 flex-shrink-0" />
                         </span>
                       ) : (
                         <span title="No audio">
-                          <AlertCircle className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+                          <AlertCircle className="w-4 h-4 text-amber-500 dark:text-amber-400 flex-shrink-0" />
                         </span>
                       )}
                     </div>
@@ -187,12 +187,12 @@ export function TranscriptRecovery({
                         {selectedMeeting.transcriptCount} transcripts
                       </span>
                       {selectedMeeting.folderPath ? (
-                        <span className="flex items-center gap-1 text-green-600">
+                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                           <CheckCircle2 className="w-4 h-4" />
                           Audio available
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-yellow-600">
+                        <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
                           <AlertCircle className="w-4 h-4" />
                           No audio
                         </span>
@@ -269,6 +269,7 @@ export function TranscriptRecovery({
             variant="outline"
             onClick={onClose}
             disabled={isRecovering || isDeleting}
+            className="bg-secondary text-secondary-foreground border-border hover:bg-accent hover:text-accent-foreground"
           >
             Cancel
           </Button>

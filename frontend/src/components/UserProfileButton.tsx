@@ -47,6 +47,9 @@ export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
 
   const registered = !!identity?.is_registered;
   const name = identity?.full_name?.trim() || 'Вход не выполнен';
+  const initials = registered && identity?.full_name?.trim()
+    ? identity.full_name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()
+    : 'IN';
 
   const handleLogout = async () => {
     setBusy(true);
@@ -88,7 +91,7 @@ export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
       {collapsed ? (
         <button
           onClick={() => setOpen((v) => !v)}
-          className="p-2 rounded-lg transition-colors duration-150 hover:bg-gray-100 text-gray-600 relative"
+          className="p-2 rounded-lg transition-colors duration-150 hover:bg-secondary text-muted-foreground relative"
           aria-label="Профиль"
           title={registered ? name : 'Профиль'}
         >
@@ -101,30 +104,18 @@ export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
         <div className="flex items-center gap-1 w-full">
           <button
             onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-2.5 flex-1 min-w-0 px-2.5 py-2 rounded-lg transition-colors duration-150 hover:bg-gray-100 text-left"
+            className="flex items-center gap-2.5 flex-1 min-w-0 px-2.5 py-2 rounded-lg transition-colors duration-150 hover:bg-secondary text-left"
             aria-label="Профиль"
           >
             <span className="relative shrink-0">
-              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-50 text-blue-600">
-                <User className="w-4 h-4 stroke-[1.75]" />
+              <span className="flex items-center justify-center w-8 h-8 rounded-full bg-[hsl(var(--brand-blue))] text-[11px] font-semibold text-white">
+                {initials}
               </span>
               {registered && (
                 <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full ring-2 ring-white" />
               )}
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-gray-900 truncate">{name}</span>
-              <span className="block text-xs text-gray-400">{registered ? 'В сети' : 'Нажми, чтобы войти'}</span>
-            </span>
-          </button>
-          {/* Кнопка проверки обновления - справа от имени */}
-          <button
-            onClick={() => triggerUpdateCheck()}
-            title="Проверить обновление"
-            aria-label="Проверить обновление"
-            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-blue-600 transition-colors"
-          >
-            <DownloadCloud className="w-4 h-4 stroke-[1.75]" />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{name}</span>
           </button>
         </div>
       )}
@@ -132,15 +123,15 @@ export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
       {/* Inline-меню */}
       {open && (
         <div
-          className={`absolute z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1.5 ${
+          className={`absolute z-50 bg-card border border-border rounded-xl shadow-xl py-1.5 ${
             collapsed ? 'left-full ml-2 bottom-0 w-56' : 'left-0 bottom-full mb-2 w-[calc(100%-0px)] min-w-[200px]'
           }`}
         >
-          <div className="px-3 py-2 border-b border-gray-100">
-            <div className="text-sm font-semibold text-gray-900 truncate">
+          <div className="px-3 py-2 border-b border-border">
+            <div className="text-sm font-semibold text-foreground truncate">
               {registered ? name : 'Вход не выполнен'}
             </div>
-            <div className="text-xs text-gray-400 mt-0.5">
+            <div className="text-xs text-muted-foreground mt-0.5">
               {registered ? 'Учётная запись Insapp' : 'Войди под своей учёткой'}
             </div>
           </div>
@@ -149,7 +140,7 @@ export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
             <button
               onClick={handleSync}
               disabled={busy}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               Синхронизировать встречи

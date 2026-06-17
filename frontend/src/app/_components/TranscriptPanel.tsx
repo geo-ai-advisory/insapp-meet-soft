@@ -50,12 +50,19 @@ export function TranscriptPanel({
   );
 
   return (
-    <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
+    <div ref={transcriptContainerRef} className="w-full border-r border-border bg-card text-foreground flex flex-col overflow-y-auto">
       {/* Title area - Sticky header */}
-      <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
+      <div className="sticky top-0 z-10 bg-card p-4 border-b border-border">
         <div className="flex flex-col space-y-3">
-          <div className="flex  flex-col space-y-2">
-            <div className="flex justify-center  items-center space-x-2">
+          <div className="flex flex-col space-y-2">
+            {/* Заголовок ленты «Расшифровка в реальном времени» (как в макете) */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-[11.5px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-3.5 w-3.5">
+                  <path d="M4 6h16M4 12h10M4 18h7" strokeLinecap="round" />
+                </svg>
+                Расшифровка в реальном времени
+              </div>
               <ButtonGroup>
                 {transcripts?.length > 0 && (
                   <Button

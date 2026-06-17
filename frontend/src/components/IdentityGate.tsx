@@ -96,26 +96,26 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
             height={64}
             className="mb-4"
           />
-          <h1 className="text-2xl font-semibold text-gray-900">Insapp-meet</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-semibold text-foreground">Insapp-meet</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             Запись и AI-резюме встреч
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6">
+        <div className="bg-card rounded-2xl shadow-xl border border-border p-6">
           <div className="flex items-center gap-2 mb-1">
             <Sparkles className="w-4 h-4 text-blue-600 stroke-[1.75]" />
-            <h2 className="text-base font-semibold text-gray-900">
+            <h2 className="text-base font-semibold text-foreground">
               Вход
             </h2>
           </div>
-          <p className="text-sm text-gray-600 mb-5">
+          <p className="text-sm text-muted-foreground mb-5">
             Войди под своей учётной записью - тем же логином и паролем, что для
             дашборда. Встречи будут подписаны твоей учёткой. Это нужно один раз.
           </p>
 
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
             Логин
           </label>
           <input
@@ -127,10 +127,10 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
             autoFocus
             disabled={isLoading}
             autoComplete="username"
-            className="w-full h-10 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 mb-3"
+            className="w-full h-10 px-3 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 mb-3"
           />
 
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
             Пароль
           </label>
           <input
@@ -141,7 +141,7 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
             placeholder="••••••••"
             disabled={isLoading}
             autoComplete="current-password"
-            className="w-full h-10 px-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 mb-1"
+            className="w-full h-10 px-3 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 mb-1"
           />
 
           {error && (
@@ -170,14 +170,14 @@ export function IdentityGate({ onDone }: IdentityGateProps) {
           <button
             onClick={onDone}
             disabled={isLoading}
-            className="w-full mt-2 h-9 text-sm text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
+            className="w-full mt-2 h-9 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
           >
             Пропустить (настроить позже)
           </button>
         </div>
 
         {serverUrl && (
-          <p className="text-center text-xs text-gray-400 mt-4">
+          <p className="text-center text-xs text-muted-foreground mt-4">
             Сервер: {serverUrl}
           </p>
         )}

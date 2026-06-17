@@ -18,6 +18,9 @@ interface MeetingDetailsResponse {
   updated_at: string;
   transcripts: Transcript[];
   folder_path?: string;
+  // Тип встречи: 'internal' (внутренняя) | 'external' (внешняя).
+  // Приходит из api_get_meeting_metadata; по умолчанию 'internal'.
+  meeting_type?: string;
 }
 
 function MeetingDetailsContent() {
@@ -135,7 +138,11 @@ function MeetingDetailsContent() {
         updated_at: metadata.updated_at,
         transcripts: transcripts, // Paginated transcripts from hook
         folder_path: metadata.folder_path, // For retranscription feature
-      });
+        // Тип встречи из метаданных (Rust возвращает meeting_type параллельно).
+        // MeetingMetadata пока не описывает это поле - читаем через as any, дефолт 'internal'.
+        meeting_type: (metadata as any).meeting_type ?? 'internal',
+        duration: (metadata as any).duration,
+      } as any);
 
       // Sync with sidebar context
       setCurrentMeeting({ id: metadata.id, title: metadata.title });
@@ -367,12 +374,12 @@ function MeetingDetailsContent() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen bg-background text-foreground">
         <div className="text-center">
-          <p className="text-red-500 mb-4">{error}</p>
+          <p className="text-destructive mb-4">{error}</p>
           <button
             onClick={() => router.push('/')}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
           >
             Go Back
           </button>

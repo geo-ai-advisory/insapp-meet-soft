@@ -397,7 +397,8 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
     let duration_sec = if duration_sec > 0.0 { Some(duration_sec) } else { None };
 
     let markdown = insapp_server::segments_to_markdown(&meeting.title, &segments);
-    let meta = insapp_server::TranscriptMeta::for_transcript(&meeting_id, &meeting.title, duration_sec);
+    let mut meta = insapp_server::TranscriptMeta::for_transcript(&meeting_id, &meeting.title, duration_sec);
+    meta.meeting_type = meeting.meeting_type.clone();
 
     let result = insapp_server::upload_transcript(&settings.server_url, &api_key, &markdown, &meta).await;
 
@@ -496,7 +497,8 @@ pub async fn insapp_upload_all_meetings<R: Runtime>(
         let duration_sec = if duration_sec > 0.0 { Some(duration_sec) } else { None };
 
         let markdown = insapp_server::segments_to_markdown(&full.title, &segments);
-        let meta = insapp_server::TranscriptMeta::for_transcript(&m.id, &full.title, duration_sec);
+        let mut meta = insapp_server::TranscriptMeta::for_transcript(&m.id, &full.title, duration_sec);
+        meta.meeting_type = full.meeting_type.clone();
 
         match insapp_server::upload_transcript(&settings.server_url, &api_key, &markdown, &meta).await {
             Ok(SyncStatus::Sent) => sent += 1,

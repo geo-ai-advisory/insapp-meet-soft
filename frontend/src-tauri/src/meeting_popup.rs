@@ -17,12 +17,17 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuild
 use tracing::{info, warn};
 
 const POPUP_LABEL: &str = "meeting-popup";
-const POPUP_WIDTH: f64 = 360.0;
+// Карточка 360x96, плюс прозрачный гаттер SHADOW_GUTTER по периметру — чтобы мягкая
+// тень парящей карточки не обрезалась краем окна (окно прозрачное).
+const CARD_WIDTH: f64 = 360.0;
 // Высота 96px — компактный layout: одна строка с иконкой/заголовком/крестиком,
 // плюс одна строка кнопок «Записать»/«Игнорировать». Без пустого пространства.
-const POPUP_HEIGHT: f64 = 96.0;
-const MARGIN_RIGHT: f64 = 16.0;
-const MARGIN_TOP: f64 = 16.0;
+const CARD_HEIGHT: f64 = 96.0;
+const SHADOW_GUTTER: f64 = 12.0;
+const POPUP_WIDTH: f64 = CARD_WIDTH + SHADOW_GUTTER * 2.0;
+const POPUP_HEIGHT: f64 = CARD_HEIGHT + SHADOW_GUTTER * 2.0;
+const MARGIN_RIGHT: f64 = 16.0 - SHADOW_GUTTER;
+const MARGIN_TOP: f64 = 16.0 - SHADOW_GUTTER;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PopupData {
@@ -91,10 +96,13 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, app_name: &str, bundle_id: &str) {
     .always_on_top(true)
     .decorations(false)
     .resizable(false)
-    // НЕ прозрачный — белый сплошной фон. Раньше transparent=true делал окно
-    // нечитаемым (видно Telegram через попап).
-    .transparent(false)
-    .shadow(true)
+    // Прозрачное окно (macOSPrivateApi=true в конфиге) — чтобы скруглённая карточка
+    // ПАРИЛА без квадратной подложки по углам. Прошлая «пустота»/«видно Telegram»
+    // была из-за прозрачного ФОНА страницы (карточка не имела своей заливки), а НЕ из-за
+    // прозрачности окна. Теперь сама карточка во фронте имеет сплошной светлый фон (--card)
+    // и тень, а углы окна за её border-radius — прозрачные.
+    .transparent(true)
+    .shadow(false)
     .skip_taskbar(true)
     .focused(true)
     .visible(true);

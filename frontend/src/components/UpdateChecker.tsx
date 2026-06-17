@@ -100,17 +100,17 @@ export function UpdateChecker() {
 
   return (
     <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[440px] max-w-[90vw]">
-      <div className="bg-white rounded-xl shadow-2xl border border-gray-200 px-4 py-3">
+      <div className="bg-card rounded-xl shadow-2xl border border-border px-4 py-3">
         {phase === 'available' && (
           <div className="flex items-center gap-3">
             <span className="flex items-center justify-center w-9 h-9 rounded-full bg-blue-50 text-blue-600 shrink-0">
               <Download className="w-4 h-4 stroke-[1.75]" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-gray-900">
+              <div className="text-sm font-semibold text-foreground">
                 Доступна новая версия{update?.version ? ` ${update.version}` : ''}
               </div>
-              <div className="text-xs text-gray-500">Обновить приложение сейчас?</div>
+              <div className="text-xs text-muted-foreground">Обновить приложение сейчас?</div>
             </div>
             <button
               onClick={handleInstall}
@@ -120,7 +120,7 @@ export function UpdateChecker() {
             </button>
             <button
               onClick={() => setDismissed(true)}
-              className="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              className="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
               aria-label="Позже"
             >
               <X className="w-4 h-4" />
@@ -132,11 +132,11 @@ export function UpdateChecker() {
           <div className="flex items-center gap-3">
             <Loader2 className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-gray-900">
+              <div className="text-sm font-semibold text-foreground">
                 {phase === 'downloading' ? `Скачиваю обновление… ${progress}%` : 'Устанавливаю, перезапуск…'}
               </div>
               {phase === 'downloading' && (
-                <div className="mt-1.5 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="mt-1.5 h-1.5 bg-secondary rounded-full overflow-hidden">
                   <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${progress}%` }} />
                 </div>
               )}
@@ -146,21 +146,21 @@ export function UpdateChecker() {
 
         {showResult && phase === 'checking' && (
           <div className="flex items-center gap-2.5">
-            <Loader2 className="w-4 h-4 text-gray-500 animate-spin" />
-            <span className="text-sm text-gray-700">Проверяю обновления…</span>
+            <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+            <span className="text-sm text-foreground">Проверяю обновления…</span>
           </div>
         )}
 
         {showResult && phase === 'uptodate' && (
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="w-4 h-4 text-green-600" />
-            <span className="text-sm text-gray-700">У вас последняя версия</span>
+            <span className="text-sm text-foreground">У вас последняя версия</span>
           </div>
         )}
 
         {showResult && phase === 'error' && (
           <div className="flex items-center justify-between gap-2.5">
-            <span className="text-sm text-gray-600">Не удалось проверить обновления</span>
+            <span className="text-sm text-muted-foreground">Не удалось проверить обновления</span>
             <button
               onClick={() => runCheck(true)}
               className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700"

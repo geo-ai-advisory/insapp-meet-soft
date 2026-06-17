@@ -32,32 +32,52 @@ export function UploadOptInToggle({ visible }: { visible: boolean }) {
     const next = !checked;
     setChecked(next);
     sessionStorage.setItem(STORAGE_KEY, next.toString());
+    console.log(`[insapp-meet] rec: облако ${next ? "вкл" : "выкл"}`);
   };
 
   if (!visible) return null;
 
   return (
     <label
-      className="flex items-center gap-2 cursor-pointer select-none px-3 py-1.5 bg-white rounded-full shadow text-xs"
+      className={`group flex items-center gap-2.5 cursor-pointer select-none px-3.5 py-2 rounded-xl border text-[13px] font-medium transition-colors ${
+        checked
+          ? "bg-accent border-accent-foreground/20 text-foreground hover:bg-accent/70"
+          : "bg-card border-border text-muted-foreground hover:bg-secondary"
+      }`}
       title={
         checked
           ? "После остановки записи транскрипция уйдёт на сервер Insapp"
           : "Транскрипция не будет отправлена на сервер - останется только локально"
       }
     >
+      {checked ? (
+        <Cloud className="w-[15px] h-[15px] text-accent-foreground stroke-[1.75]" />
+      ) : (
+        <CloudOff className="w-[15px] h-[15px] text-muted-foreground stroke-[1.75]" />
+      )}
+      <span>
+        Отправить в{" "}
+        <b className="font-semibold">облако Insapp</b>
+      </span>
+      {/* Тумблер-«пилюля» как в макете (свитч справа). Скрытый чекбокс держит a11y/onChange. */}
       <input
         type="checkbox"
         checked={checked}
         onChange={handleToggle}
-        className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+        className="sr-only peer"
+        aria-label="Отправить транскрипцию в облако Insapp"
       />
-      {checked ? (
-        <Cloud className="w-3.5 h-3.5 text-blue-600" />
-      ) : (
-        <CloudOff className="w-3.5 h-3.5 text-gray-400" />
-      )}
-      <span className={checked ? "text-gray-900" : "text-gray-500"}>
-        Отправить в облако Insapp
+      <span
+        className={`relative ml-0.5 h-5 w-[34px] shrink-0 rounded-full transition-colors ${
+          checked ? "bg-primary" : "bg-border"
+        }`}
+        aria-hidden="true"
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform duration-150 ${
+            checked ? "translate-x-[14px]" : "translate-x-0"
+          }`}
+        />
       </span>
     </label>
   );

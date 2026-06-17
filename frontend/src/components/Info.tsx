@@ -16,21 +16,20 @@ const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, re
         {isCollapsed ? (
           <button
             ref={ref}
-            className="flex items-center justify-center p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
+            className="flex items-center justify-center p-2 hover:bg-secondary rounded-lg transition-colors text-muted-foreground"
             title="О приложении"
           >
             <CircleHelp className="w-5 h-5 stroke-[1.75]" />
           </button>
         ) : (
-          <Button
+          <button
             ref={ref}
-            variant="secondary"
-            className="w-full"
-            title="О приложении Insapp-meet"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title="О приложении"
+            aria-label="О приложении"
           >
-            <CircleHelp />
-            О приложении
-          </Button>
+            <CircleHelp className="h-[17px] w-[17px] stroke-[1.75]" />
+          </button>
         )}
       </DialogTrigger>
       <DialogContent>

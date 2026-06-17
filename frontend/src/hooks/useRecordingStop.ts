@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
+import { appDataDir } from '@tauri-apps/api/path';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -12,7 +15,7 @@ import Analytics from '@/lib/analytics';
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
 interface UseRecordingStopReturn {
-  handleRecordingStop: (callApi: boolean) => Promise<void>;
+  handleRecordingStop: (callApi: boolean, overrideName?: string, overrideType?: 'internal' | 'external') => Promise<void>;
   isStopping: boolean;
   isProcessingTranscript: boolean;
   isSavingTranscript: boolean;
@@ -114,7 +117,7 @@ export function useRecordingStop(
   }, [router]);
 
   // Main recording stop handler
-  const handleRecordingStop = useCallback(async (isCallApi: boolean) => {
+  const handleRecordingStop = useCallback(async (isCallApi: boolean, overrideName?: string, overrideType?: 'internal' | 'external') => {
     if (recordingStoppedDataRef.current) {
       await recordingStoppedDataRef.current;
     }
@@ -263,8 +266,14 @@ export function useRecordingStop(
             setStatus(RecordingStatus.UPLOADING_TO_SERVER, 'Отправляю на сервер Insapp...');
           }
 
+          // Имя из окна «Сохранить встречу» (overrideName) ПЕРЕБИВАЕТ дефолтное имя
+          // от backend (savedMeetingName) - иначе пользовательское название терялось
+          // (баг: встреча сохранялась под «Meeting <дата>», даже если юзер ввёл своё).
+          const finalMeetingName = (overrideName && overrideName.trim())
+            ? overrideName.trim()
+            : (savedMeetingName || meetingTitle || 'New Meeting');
           const responseData = await storageService.saveMeeting(
-            savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
+            finalMeetingName,
             freshTranscripts,
             folderPath
           );
@@ -289,6 +298,18 @@ export function useRecordingStop(
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
+
+          // Тип встречи из окна сохранения (Внутренняя/Внешняя) -> backend + сервер.
+          if (overrideType) {
+            try {
+              await invoke('api_set_meeting_type', { meetingId, meetingType: overrideType });
+              // Переотправляем встречу, чтобы тип ушёл на сервер (saveMeeting выше отправил
+              // с дефолтным типом; meta переотправки берёт актуальный тип из БД).
+              await invoke('insapp_upload_meeting_by_id', { meetingId });
+            } catch (e) {
+              console.error('[insapp-meet] save: не удалось сохранить/синхронизировать тип', e);
+            }
+          }
 
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
@@ -442,9 +463,55 @@ export function useRecordingStop(
       handleRecordingStopRef.current(callApi);
     };
 
+    // Пилюля-индикатор: СТОП из пилюли -> ТОТ ЖЕ полный путь остановки, что у основной
+    // кнопки «Стоп» (финализация, сохранение встречи, переход на экран встречи).
+    const unlistenStop = listen('stop-recording-from-pill', async () => {
+      console.log('[insapp-meet] main: СТОП из пилюли -> поднимаю окно + окно сохранения');
+      // Пилюля = ТОТ ЖЕ путь, что кнопка «Стоп» в приложении: не останавливаем запись
+      // молча, а поднимаем главное окно (юзер мог уйти в другое приложение) и открываем
+      // окно «Сохранить встречу». Реальную остановку выполняет подтверждение в окне
+      // (handleConfirmSave -> stop_recording) - иначе встреча сохранялась бы без
+      // подтверждения названия/типа (баг: «стоп из пилюли не показывает окно сохранения»).
+      // Если окно сохранения недоступно - страховочный прямой путь остановки.
+      try {
+        const win = getCurrentWindow();
+        await win.unminimize().catch(() => {});
+        await win.show().catch(() => {});
+        await win.setFocus().catch(() => {});
+      } catch (e) {
+        console.error('[insapp-meet] main: не удалось поднять главное окно', e);
+      }
+      if (typeof (window as any).requestSaveMeeting === 'function') {
+        (window as any).requestSaveMeeting();
+        return;
+      }
+      // Страховка: окна сохранения нет -> прямой стоп (старое поведение).
+      try {
+        const dataDir = await appDataDir();
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const savePath = `${dataDir}/recording-${timestamp}.wav`;
+        await invoke('stop_recording', { args: { save_path: savePath } });
+      } catch (e) {
+        console.error('[insapp-meet] main: ошибка прямой остановки из пилюли', e);
+      }
+      handleRecordingStopRef.current(true);
+    });
+    // Пилюля-индикатор: ПАУЗА/возобновление из пилюли -> та же команда записи (единый источник истины).
+    const unlistenPause = listen('toggle-pause-from-pill', async () => {
+      try {
+        const paused = await invoke<boolean>('is_recording_paused');
+        await invoke(paused ? 'resume_recording' : 'pause_recording');
+        console.log('[insapp-meet] main: пауза из пилюли ->', paused ? 'возобновлено' : 'на паузе');
+      } catch (e) {
+        console.error('[insapp-meet] main: ошибка паузы из пилюли', e);
+      }
+    });
+
     // Cleanup on unmount
     return () => {
       delete (window as any).handleRecordingStop;
+      unlistenStop.then((un) => un());
+      unlistenPause.then((un) => un());
     };
   }, []);
 

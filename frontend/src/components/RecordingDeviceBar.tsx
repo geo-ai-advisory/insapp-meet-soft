@@ -90,6 +90,7 @@ export function RecordingDeviceBar({ isRecording = false }: { isRecording?: bool
   };
 
   const handleMicChange = (value: string) => {
+    console.log(`[insapp-meet] rec: смена устройства (микрофон) -> ${value === 'default' ? 'по умолчанию' : cleanDeviceName(value)}`);
     setSelectedDevices({
       ...selectedDevices,
       micDevice: value === 'default' ? null : value,
@@ -101,6 +102,7 @@ export function RecordingDeviceBar({ isRecording = false }: { isRecording?: bool
     !!selectedDevices.systemDevice && selectedDevices.systemDevice !== '__none__';
 
   const handleSystemToggle = (on: boolean) => {
+    console.log(`[insapp-meet] rec: системный звук ${on ? 'вкл' : 'выкл'}`);
     setSelectedDevices({
       ...selectedDevices,
       systemDevice: on ? '__default__' : null,
@@ -117,37 +119,39 @@ export function RecordingDeviceBar({ isRecording = false }: { isRecording?: bool
   };
 
   return (
-    <div className="flex items-center gap-3 bg-white rounded-2xl shadow-lg border border-gray-100 px-4 py-2.5">
-      {/* Выбор микрофона */}
-      <div className="flex items-center gap-2 min-w-0">
-        {switching === 'mic' ? (
-          <Loader2 className="h-4 w-4 text-blue-600 animate-spin shrink-0" />
-        ) : (
-          <Mic className="h-4 w-4 text-gray-500 stroke-[1.75] shrink-0" />
-        )}
-        <Select value={micValue} onValueChange={handleMicChange} disabled={switching !== null}>
-          <SelectTrigger
-            className="h-8 min-w-[180px] max-w-[240px] border-0 shadow-none bg-transparent px-1.5 text-sm font-medium text-gray-900 focus:ring-0 hover:bg-gray-50 rounded-lg transition-colors"
-            aria-label="Выбор микрофона"
-          >
-            <SelectValue placeholder="Микрофон по умолчанию" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="default">Микрофон по умолчанию</SelectItem>
-            {inputDevices.map((device) => (
-              <SelectItem
-                key={device.name}
-                value={`${device.name} (${device.device_type.toLowerCase()})`}
-              >
-                {device.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="flex items-center gap-2.5 bg-card rounded-2xl shadow-md border border-border px-3 py-2.5">
+      {/* Выбор микрофона - «пилюля» c иконкой и шевроном, как в макете */}
+      <div className="flex items-center gap-1 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 rounded-xl border border-border bg-card px-3 py-2 transition-colors hover:bg-secondary focus-within:border-primary">
+          {switching === 'mic' ? (
+            <Loader2 className="h-[15px] w-[15px] text-primary animate-spin shrink-0" />
+          ) : (
+            <Mic className="h-[15px] w-[15px] text-muted-foreground stroke-[1.75] shrink-0" />
+          )}
+          <Select value={micValue} onValueChange={handleMicChange} disabled={switching !== null}>
+            <SelectTrigger
+              className="h-6 min-w-[170px] max-w-[240px] border-0 shadow-none bg-transparent px-0 text-[13px] font-medium text-foreground focus:ring-0 hover:bg-transparent"
+              aria-label="Выбор микрофона"
+            >
+              <SelectValue placeholder="Микрофон по умолчанию" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">Микрофон по умолчанию</SelectItem>
+              {inputDevices.map((device) => (
+                <SelectItem
+                  key={device.name}
+                  value={`${device.name} (${device.device_type.toLowerCase()})`}
+                >
+                  {device.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 shrink-0"
+          className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50 shrink-0"
           aria-label="Обновить список устройств"
           title="Обновить список устройств"
         >
@@ -156,18 +160,18 @@ export function RecordingDeviceBar({ isRecording = false }: { isRecording?: bool
       </div>
 
       {/* Разделитель */}
-      <div className="w-px h-7 bg-gray-200 shrink-0" />
+      <div className="w-px h-7 bg-border shrink-0" />
 
-      {/* Тумблер системного звука */}
-      <label className="flex items-center gap-2 cursor-pointer select-none shrink-0">
+      {/* Тумблер системного звука - «пилюля» с иконкой, текстом и свитчем */}
+      <label className="flex items-center gap-2.5 cursor-pointer select-none shrink-0 rounded-xl border border-border bg-card px-3 py-2 transition-colors hover:bg-secondary">
         <Speaker
-          className={`h-4 w-4 stroke-[1.75] transition-colors ${
-            systemOn ? 'text-gray-700' : 'text-gray-300'
+          className={`h-[15px] w-[15px] stroke-[1.75] transition-colors ${
+            systemOn ? 'text-muted-foreground' : 'text-border'
           }`}
         />
         <span
-          className={`text-sm font-medium transition-colors ${
-            systemOn ? 'text-gray-900' : 'text-gray-400'
+          className={`text-[13px] font-medium transition-colors ${
+            systemOn ? 'text-foreground' : 'text-muted-foreground'
           }`}
         >
           Системный звук

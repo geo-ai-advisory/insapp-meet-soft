@@ -43,7 +43,7 @@ export function SetupOverviewStep() {
     >
       <div className="flex flex-col items-center space-y-10">
         {/* Steps Card */}
-        <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 p-4">
+        <div className="w-full max-w-md bg-card rounded-lg border border-border p-4">
           <div className="space-y-4">
             {steps.map((step) => (
               <div
@@ -51,7 +51,7 @@ export function SetupOverviewStep() {
                 className="flex items-start gap-4 p-1"
               >
                 <div className="flex-1 ml-1">
-                  <h3 className="font-medium text-gray-900 flex items-center gap-2">
+                  <h3 className="font-medium text-foreground flex items-center gap-2">
                     Шаг {step.number}: {step.title}
                   </h3>
                 </div>

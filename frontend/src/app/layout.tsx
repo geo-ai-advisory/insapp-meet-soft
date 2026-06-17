@@ -1,7 +1,7 @@
 'use client'
 
 import './globals.css'
-import { Source_Sans_3 } from 'next/font/google'
+import { Inter } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
@@ -29,12 +29,21 @@ import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 // SystemNotificationListener убран - уведомления идут из Rust через terminal-notifier sidecar
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { installDevTauriMock } from '@/lib/devMock'
+
+// DEV: мок движка с демо-данными для браузерной вёрстки 1:1 с макетом.
+// В собранном приложении настоящий __TAURI_INTERNALS__ уже есть -> мок не ставится.
+if (typeof window !== 'undefined') {
+  installDevTauriMock();
+}
 
 
-const sourceSans3 = Source_Sans_3({
-  subsets: ['latin'],
+// Шрифт интерфейса — Inter (как в утверждённом макете). Cyrillic для русского текста.
+const sourceSans3 = Inter({
+  subsets: ['latin', 'cyrillic'],
   weight: ['400', '500', '600', '700'],
   variable: '--font-source-sans-3',
+  display: 'swap',
 })
 
 // Module-level component — stable reference across RootLayout re-renders.
@@ -78,7 +87,8 @@ export default function RootLayout({
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const path = window.location.pathname;
-      setIsPopupRoute(path.startsWith('/meeting-popup'));
+      // Попап-маршруты (без главного layout): окно «Записать встречу?» и пилюля-индикатор записи
+      setIsPopupRoute(path.startsWith('/meeting-popup') || path.startsWith('/recording-indicator'));
     }
   }, []);
 
@@ -94,6 +104,16 @@ export default function RootLayout({
   const [importFilePath, setImportFilePath] = useState<string | null>(null)
 
   useEffect(() => {
+    // DEV-ONLY: браузерная dev-версия без Tauri-движка (__TAURI_INTERNALS__ отсутствует) -
+    // пропускаем онбординг, чтобы верстать/проверять все экраны с hot-reload.
+    // В собранном приложении движок есть -> ветка не срабатывает, онбординг как обычно.
+    const isTauriRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (!isTauriRuntime && process.env.NODE_ENV === 'development') {
+      console.log('[Layout] DEV web preview - пропускаю онбординг (нет Tauri-движка)');
+      setOnboardingCompleted(true);
+      setShowOnboarding(false);
+      return;
+    }
     // Check onboarding status first
     invoke<{ completed: boolean } | null>('get_onboarding_status')
       .then((status) => {
@@ -174,7 +194,11 @@ export default function RootLayout({
         console.log('[Layout] Dispatching start-recording-from-sidebar from popup');
         window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
       };
-      setTimeout(fireDispatch, 250);
+      // Первый dispatch — сразу (главное окно уже показано, его listener смонтирован).
+      // Запасные retry ловят случай, когда useRecordingStart перерегистрируется
+      // (handleDirectStart сам игнорит повтор через isRecording/isAutoStarting).
+      fireDispatch();
+      setTimeout(fireDispatch, 300);
       setTimeout(fireDispatch, 900);
       setTimeout(fireDispatch, 1800);
     });

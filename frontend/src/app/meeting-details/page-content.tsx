@@ -5,9 +5,10 @@ import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
-import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { SummaryPanel, MeetingTab } from '@/components/MeetingDetails/SummaryPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
@@ -59,15 +60,30 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
-  // Показ правого блока AI-резюме. Тогглится кнопкой «Резюме» в левой панели -
-  // иногда нужен только транскрипт.
-  const [showSummary, setShowSummary] = useState<boolean>(true);
+  // Активная вкладка экрана встречи (макет «Insapp Pro»): транскрипт / резюме / задачи.
+  const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
 
   // Sidebar context
-  const { serverAddress } = useSidebar();
+  const { serverAddress, refetchMeetings } = useSidebar();
+  const router = useRouter();
+
+  // Удалить пустую встречу (кнопка на экране встречи, когда нет ни одной реплики):
+  // убираем из БД + обновляем sidebar + уходим на главную, чтобы не копить мусор.
+  const handleDeleteMeeting = async () => {
+    try {
+      await invoke('api_delete_meeting', { meetingId: meeting.id });
+      console.log('[insapp-meet] meet: встреча удалена', meeting.id);
+      if (onMeetingUpdated) await onMeetingUpdated();
+      await refetchMeetings();
+      router.push('/');
+    } catch (e) {
+      console.error('[insapp-meet] meet: не удалось удалить встречу', e);
+      toast.error('Не удалось удалить встречу');
+    }
+  };
 
   // Get model config from ConfigContext
   const { modelConfig, setModelConfig } = useConfig();
@@ -151,6 +167,7 @@ export default function PageContent({
     const autoGenerate = async () => {
       if (shouldAutoGenerate && meetingData.transcripts.length > 0 && !cancelled) {
         console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
+        console.log('[insapp-meet] meet: generate-summary (auto)');
         await summaryGeneration.handleGenerateSummary('');
 
         // Notify parent that auto-generation is complete (only if not cancelled)
@@ -168,45 +185,65 @@ export default function PageContent({
     };
   }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
 
+  // Задачи (action items) встречи. В реальных данных (markdown / BlockNote-резюме)
+  // отдельного структурированного поля задач НЕТ - поэтому фейк не выдумываем:
+  // вкладка «Задачи» показывает пустой статус и счётчик 0 (по ТЗ).
+  const meetingTasks: Array<{ text: string; owner?: string }> = [];
+  const tasksCount = meetingTasks.length;
+
+  // Панель транскрипта целиком - рендерим один раз и отдаём как контент вкладки.
+  // summaryVisible={false} заставляет панель занять всю ширину вкладки (flex-1).
+  const transcriptPanel = (
+    <TranscriptPanel
+      transcripts={meetingData.transcripts}
+      customPrompt={customPrompt}
+      onPromptChange={setCustomPrompt}
+      onCopyTranscript={copyOperations.handleCopyTranscript}
+      onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
+      isRecording={isRecording}
+      disableAutoScroll={true}
+      // Pagination props for efficient loading
+      usePagination={true}
+      segments={segments}
+      hasMore={hasMore}
+      isLoadingMore={isLoadingMore}
+      totalCount={totalCount}
+      loadedCount={loadedCount}
+      onLoadMore={onLoadMore}
+      // Retranscription props
+      meetingId={meeting.id}
+      meetingFolderPath={meeting.folder_path}
+      onRefetchTranscripts={onRefetchTranscripts}
+      // На вкладке транскрипт панель всегда полноширинная.
+      summaryVisible={false}
+      // Экран встречи: пустой транскрипт -> «в этой встрече ничего не записано» + удалить.
+      isMeetingView={true}
+      onDeleteMeeting={handleDeleteMeeting}
+    />
+  );
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
-    >
+    <motion.div className="flex flex-col h-screen bg-background text-foreground">
       <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          transcripts={meetingData.transcripts}
-          customPrompt={customPrompt}
-          onPromptChange={setCustomPrompt}
-          onCopyTranscript={copyOperations.handleCopyTranscript}
-          onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
-          isRecording={isRecording}
-          disableAutoScroll={true}
-          // Pagination props for efficient loading
-          usePagination={true}
-          segments={segments}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          totalCount={totalCount}
-          loadedCount={loadedCount}
-          onLoadMore={onLoadMore}
-          // Retranscription props
-          meetingId={meeting.id}
-          meetingFolderPath={meeting.folder_path}
-          onRefetchTranscripts={onRefetchTranscripts}
-          summaryVisible={showSummary}
-          onToggleSummary={() => setShowSummary((v) => !v)}
-        />
-        {showSummary && (
         <SummaryPanel
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          transcriptSlot={transcriptPanel}
+          tasksCount={tasksCount}
+          tasks={meetingTasks}
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}
           onTitleChange={meetingData.handleTitleChange}
           isEditingTitle={meetingData.isEditingTitle}
           onStartEditTitle={() => meetingData.setIsEditingTitle(true)}
-          onFinishEditTitle={() => meetingData.setIsEditingTitle(false)}
+          onFinishEditTitle={async () => {
+            meetingData.setIsEditingTitle(false);
+            // Сохраняем название СРАЗУ при завершении редактирования (Enter/blur):
+            // в локальную БД + sidebar + на сервер. Раньше сохранение шло ТОЛЬКО по
+            // кнопке «Сохранить», которая видна лишь при наличии AI-резюме -> без резюме
+            // переименование нигде не сохранялось и сбрасывалось при выходе.
+            await meetingData.handleSaveMeetingTitle();
+          }}
           isTitleDirty={meetingData.isTitleDirty}
           summaryRef={meetingData.blockNoteSummaryRef}
           isSaving={meetingData.isSaving}
@@ -236,7 +273,6 @@ export default function PageContent({
           onOpenModelSettings={handleRegisterModalOpen}
           onAiSummarySaved={onAiSummarySaved}
         />
-        )}
       </div>
     </motion.div>
   );

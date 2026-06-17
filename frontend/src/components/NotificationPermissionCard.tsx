@@ -42,18 +42,18 @@ export function NotificationPermissionCard() {
   const handleTest = handleEnable;
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+    <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
       <div className="flex items-start gap-3">
         {status === "granted" ? (
           <Bell className="w-5 h-5 text-green-600 mt-0.5" />
         ) : (
-          <BellOff className="w-5 h-5 text-gray-400 mt-0.5" />
+          <BellOff className="w-5 h-5 text-muted-foreground mt-0.5" />
         )}
         <div className="flex-1">
-          <h3 className="text-base font-semibold text-gray-900 mb-1">
+          <h3 className="text-base font-semibold text-foreground mb-1">
             Системные уведомления
           </h3>
-          <p className="text-sm text-gray-600 mb-3">
+          <p className="text-sm text-muted-foreground mb-3">
             Когда ты заходишь в Telemost / Zoom / Teams / FaceTime / Discord -
             macOS показывает уведомление в правом верхнем углу с предложением записать встречу.
           </p>
@@ -72,7 +72,7 @@ export function NotificationPermissionCard() {
               {isRequesting && <Loader2 className="w-3 h-3 mr-2 animate-spin" />}
               {status === "granted" ? "Отправить ещё раз" : "Тест уведомления"}
             </Button>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-muted-foreground">
               Если macOS попросит разрешение - нажми «Разрешить» в системном диалоге.
             </p>
           </div>

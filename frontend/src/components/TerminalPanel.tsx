@@ -374,18 +374,18 @@ export function TerminalPanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white text-gray-900">
+    <div className="flex flex-col h-full bg-card text-foreground">
       {/* Header */}
-      <div className="flex items-center justify-between min-h-[64px] px-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+      <div className="flex items-center justify-between min-h-[64px] px-4 border-b border-border bg-background flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <Sparkles className="w-4 h-4 text-blue-600 flex-shrink-0" />
-          <span className="text-sm font-medium text-gray-900">AI-резюме</span>
+          <span className="text-sm font-medium text-foreground">AI-резюме</span>
           {isStarting && (
-            <Loader2 className="w-3 h-3 animate-spin text-gray-400 flex-shrink-0" />
+            <Loader2 className="w-3 h-3 animate-spin text-muted-foreground flex-shrink-0" />
           )}
           {!isStarting && (
             <span
-              className="ml-3 text-xs text-gray-500 truncate"
+              className="ml-3 text-xs text-muted-foreground truncate"
               title={
                 wasUploadedToServer
                   ? "Транскрипт встречи уже на сервере"
@@ -399,7 +399,7 @@ export function TerminalPanel({
                 </span>
               ) : (
                 <span className="flex items-center gap-1">
-                  <CloudOff className="w-3 h-3 text-gray-400" />
+                  <CloudOff className="w-3 h-3 text-muted-foreground" />
                   Транскрипт не отправлялся
                 </span>
               )}
@@ -409,7 +409,7 @@ export function TerminalPanel({
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <button
             onClick={onMinimize}
-            className="inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 hover:text-gray-900 rounded-md transition-colors"
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground rounded-md transition-colors"
             aria-label="Свернуть"
             title="Свернуть - процесс продолжит работу, вернуться можно по кнопке внизу справа"
           >
@@ -418,7 +418,7 @@ export function TerminalPanel({
           </button>
           <button
             onClick={onClose}
-            className="inline-flex items-center justify-center h-8 w-8 text-gray-500 hover:bg-gray-200 hover:text-gray-900 rounded-md transition-colors"
+            className="inline-flex items-center justify-center h-8 w-8 text-muted-foreground hover:bg-secondary hover:text-foreground rounded-md transition-colors"
             aria-label="Закрыть"
             title="Закрыть - процесс AI-резюме будет остановлен"
           >
@@ -435,7 +435,7 @@ export function TerminalPanel({
       />
 
       {/* Footer - единая система Button (sm size) */}
-      <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50 flex-shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 px-4 py-3 border-t border-border bg-background flex-shrink-0 flex-wrap">
         <Button
           variant="primary"
           size="sm"
@@ -469,7 +469,7 @@ export function TerminalPanel({
 
         <button
           onClick={handleRestart}
-          className="ml-auto p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+          className="ml-auto p-1.5 text-muted-foreground hover:text-muted-foreground hover:bg-secondary rounded-md transition-colors"
           title="Перезапустить процесс AI"
           aria-label="Перезапустить"
         >
@@ -489,12 +489,12 @@ export function TerminalPanel({
                 Резюме отправлено на сервер и в окно митинга
               </span>
             ) : serverStatus === "disabled" ? (
-              <span className="text-gray-500 flex items-center gap-1">
+              <span className="text-muted-foreground flex items-center gap-1">
                 <CloudOff className="w-3 h-3" />
                 Авто-отправка выключена
               </span>
             ) : isSavedLocally && serverStatus === "idle" ? (
-              <span className="text-gray-600">
+              <span className="text-muted-foreground">
                 Сохранено в окно митинга
               </span>
             ) : null}

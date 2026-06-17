@@ -123,6 +123,9 @@ pub struct MeetingDetails {
     pub created_at: String,
     pub updated_at: String,
     pub transcripts: Vec<MeetingTranscript>,
+    /// Тип встречи: 'internal' (Внутренняя) | 'external' (Внешняя). По умолчанию 'internal'.
+    #[serde(default = "default_meeting_type")]
+    pub meeting_type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -148,6 +151,22 @@ pub struct MeetingMetadata {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    /// Тип встречи: 'internal' (Внутренняя) | 'external' (Внешняя). По умолчанию 'internal'.
+    #[serde(default = "default_meeting_type")]
+    pub meeting_type: String,
+}
+
+/// Дефолт типа встречи для старых записей без явного значения.
+pub fn default_meeting_type() -> String {
+    "internal".to_string()
+}
+
+/// Нормализация типа встречи из БД (None/пусто/мусор -> 'internal').
+pub fn normalize_meeting_type(raw: Option<String>) -> String {
+    match raw.as_deref() {
+        Some("external") => "external".to_string(),
+        _ => "internal".to_string(),
+    }
 }
 
 /// Paginated transcripts response with total count
@@ -831,6 +850,7 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 folder_path: meeting.folder_path,
+                meeting_type: normalize_meeting_type(meeting.meeting_type),
             })
         }
         Ok(None) => {
@@ -925,6 +945,37 @@ pub async fn api_save_meeting_title<R: Runtime>(
         Err(e) => {
             log_error!("Failed to update meeting {}", e);
             Err(format!("Failed to update meeting: {}", e))
+        }
+    }
+}
+
+/// Сохранить тип встречи: 'internal' (Внутренняя) | 'external' (Внешняя).
+#[tauri::command]
+pub async fn api_set_meeting_type<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    meeting_type: String,
+    _auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log_info!(
+        "api_set_meeting_type called for meeting_id: {}, type: {}",
+        meeting_id,
+        meeting_type
+    );
+    let pool = state.db_manager.pool();
+    match MeetingsRepository::update_meeting_type(pool, &meeting_id, &meeting_type).await {
+        Ok(true) => {
+            log_info!("Successfully saved meeting type");
+            Ok(serde_json::json!({"message": "Meeting type saved successfully"}))
+        }
+        Ok(false) => {
+            log_error!("No meeting found with id {}", meeting_id);
+            Err(format!("No meeting found with id {}", meeting_id))
+        }
+        Err(e) => {
+            log_error!("Failed to update meeting type {}", e);
+            Err(format!("Failed to update meeting type: {}", e))
         }
     }
 }

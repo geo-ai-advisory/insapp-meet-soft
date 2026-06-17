@@ -64,6 +64,7 @@ export function AiSummarySettings() {
     if (!settings) return;
     setIsSaving(true);
     try {
+      console.log('[insapp-meet] settings: сохранение настроек AI-резюме');
       await invoke("ai_summary_save_settings", { settings });
       toast.success("Настройки сохранены");
       checkCli(settings.command);
@@ -76,7 +77,7 @@ export function AiSummarySettings() {
 
   if (isLoading || !settings) {
     return (
-      <div className="flex items-center gap-2 text-gray-500 p-6">
+      <div className="flex items-center gap-2 text-muted-foreground p-6">
         <Loader2 className="w-4 h-4 animate-spin" />
         Загружаю настройки...
       </div>
@@ -85,12 +86,12 @@ export function AiSummarySettings() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
         <div className="flex items-start gap-3 mb-5">
-          <Terminal className="w-5 h-5 text-gray-600 mt-0.5" />
+          <Terminal className="w-5 h-5 text-muted-foreground mt-0.5" />
           <div className="flex-1">
-            <h3 className="text-base font-semibold text-gray-900">Терминал для AI-резюме</h3>
-            <p className="text-sm text-gray-600 mt-1">
+            <h3 className="text-base font-semibold text-foreground">Терминал для AI-резюме</h3>
+            <p className="text-sm text-muted-foreground mt-1">
               Когда нажимаешь «Сделать резюме» в карточке встречи - открывается встроенный терминал
               и запускается выбранный CLI с транскриптом.
             </p>
@@ -100,7 +101,7 @@ export function AiSummarySettings() {
         {/* Provider selector */}
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Команда</label>
+            <label className="block text-sm font-medium text-foreground mb-2">Команда</label>
             <div className="grid grid-cols-3 gap-2">
               {[
                 { value: "claude", label: "Claude Code" },
@@ -112,8 +113,8 @@ export function AiSummarySettings() {
                   onClick={() => handleProviderChange(opt.value)}
                   className={`px-4 py-2 text-sm rounded-md border transition-colors ${
                     settings.provider === opt.value
-                      ? "border-blue-500 bg-blue-50 text-blue-700 font-medium"
-                      : "border-gray-300 hover:bg-gray-50"
+                      ? "border-primary bg-accent text-accent-foreground font-medium"
+                      : "border-border text-foreground hover:bg-secondary"
                   }`}
                 >
                   {opt.label}
@@ -124,7 +125,7 @@ export function AiSummarySettings() {
 
           {settings.provider === "custom" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-foreground mb-2">
                 Путь к команде или имя в PATH
               </label>
               <input
@@ -136,7 +137,7 @@ export function AiSummarySettings() {
                 }}
                 onBlur={() => checkCli(settings.command)}
                 placeholder="/usr/local/bin/моя-обёртка"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-border bg-card text-foreground rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           )}
@@ -145,10 +146,10 @@ export function AiSummarySettings() {
           <div
             className={`flex items-center gap-2 text-sm p-3 rounded-md ${
               checking
-                ? "bg-gray-50 text-gray-600"
+                ? "bg-secondary text-muted-foreground"
                 : cliPath
-                  ? "bg-green-50 text-green-800"
-                  : "bg-red-50 text-red-800"
+                  ? "bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300"
+                  : "bg-destructive/10 text-destructive"
             }`}
           >
             {checking ? (
@@ -175,7 +176,7 @@ export function AiSummarySettings() {
 
           {/* Format */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Формат транскрипта</label>
+            <label className="block text-sm font-medium text-foreground mb-2">Формат транскрипта</label>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { value: "markdown", label: "Markdown (простой текст)" },
@@ -186,8 +187,8 @@ export function AiSummarySettings() {
                   onClick={() => setSettings({ ...settings, format: opt.value })}
                   className={`px-4 py-2 text-sm rounded-md border transition-colors ${
                     settings.format === opt.value
-                      ? "border-blue-500 bg-blue-50 text-blue-700 font-medium"
-                      : "border-gray-300 hover:bg-gray-50"
+                      ? "border-primary bg-accent text-accent-foreground font-medium"
+                      : "border-border text-foreground hover:bg-secondary"
                   }`}
                 >
                   {opt.label}
@@ -205,13 +206,13 @@ export function AiSummarySettings() {
                 onChange={(e) =>
                   setSettings({ ...settings, use_print_mode: e.target.checked })
                 }
-                className="mt-0.5"
+                className="mt-0.5 accent-primary"
               />
               <div>
-                <p className="text-sm font-medium text-gray-900">
+                <p className="text-sm font-medium text-foreground">
                   Использовать флаг <code>--print</code>
                 </p>
-                <p className="text-xs text-gray-600">
+                <p className="text-xs text-muted-foreground">
                   Выведет ответ сразу и выйдет, без интерактивного режима
                 </p>
               </div>
@@ -220,17 +221,17 @@ export function AiSummarySettings() {
 
           {/* Prompt */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Шаблон промпта</label>
+            <label className="block text-sm font-medium text-foreground mb-2">Шаблон промпта</label>
             <textarea
               value={settings.prompt_template}
               onChange={(e) =>
                 setSettings({ ...settings, prompt_template: e.target.value })
               }
               rows={6}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-border bg-card text-foreground rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder="Промпт для AI..."
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               Можно использовать <code>{"{title}"}</code> и <code>{"{file}"}</code> -
               они заменятся на название встречи и путь к транскрипту.
             </p>

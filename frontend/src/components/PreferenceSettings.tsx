@@ -94,6 +94,7 @@ export function PreferenceSettings() {
         };
 
         console.log("Calling updateNotificationSettings with:", updatedSettings);
+        console.log('[insapp-meet] settings: сохранение уведомлений');
         await updateNotificationSettings(updatedSettings);
         setPreviousNotificationsEnabled(notificationsEnabled);
         console.log("Successfully updated notification settings to:", notificationsEnabled);
@@ -135,12 +136,12 @@ export function PreferenceSettings() {
 
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
-    return <div className="max-w-2xl mx-auto p-6">Загружаю настройки...</div>
+    return <div className="max-w-2xl mx-auto p-6 text-muted-foreground">Загружаю настройки...</div>
   }
 
   // Show loading if notificationsEnabled hasn't been determined yet
   if (notificationsEnabled === null && !isLoadingPreferences) {
-    return <div className="max-w-2xl mx-auto p-6">Загружаю настройки...</div>
+    return <div className="max-w-2xl mx-auto p-6 text-muted-foreground">Загружаю настройки...</div>
   }
 
   // Ensure we have a boolean value for the Switch component
@@ -149,33 +150,33 @@ export function PreferenceSettings() {
   return (
     <div className="space-y-6">
       {/* Notifications Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Уведомления</h3>
-            <p className="text-sm text-gray-600">Показывать уведомления при старте и завершении встречи</p>
+            <h3 className="text-lg font-semibold text-foreground mb-2">Уведомления</h3>
+            <p className="text-sm text-muted-foreground">Показывать уведомления при старте и завершении встречи</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
       </div>
 
       {/* Data Storage Locations Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Места хранения данных</h3>
-        <p className="text-sm text-gray-600 mb-6">
+      <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-foreground mb-4">Места хранения данных</h3>
+        <p className="text-sm text-muted-foreground mb-6">
           Где Insapp-meet хранит твои данные
         </p>
 
         <div className="space-y-4">
           {/* Database Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Database</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
+          {/* <div className="p-4 border border-border rounded-lg bg-secondary">
+            <div className="font-medium mb-2 text-foreground">Database</div>
+            <div className="text-sm text-muted-foreground mb-3 break-all font-mono text-xs">
               {storageLocations?.database || 'Loading...'}
             </div>
             <button
               onClick={() => handleOpenFolder('database')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md bg-card text-foreground hover:bg-secondary transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               Open Folder
@@ -183,14 +184,14 @@ export function PreferenceSettings() {
           </div> */}
 
           {/* Models Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Whisper Models</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
+          {/* <div className="p-4 border border-border rounded-lg bg-secondary">
+            <div className="font-medium mb-2 text-foreground">Whisper Models</div>
+            <div className="text-sm text-muted-foreground mb-3 break-all font-mono text-xs">
               {storageLocations?.models || 'Loading...'}
             </div>
             <button
               onClick={() => handleOpenFolder('models')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md bg-card text-foreground hover:bg-secondary transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               Open Folder
@@ -198,14 +199,14 @@ export function PreferenceSettings() {
           </div> */}
 
           {/* Recordings Location */}
-          <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Записи встреч</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
+          <div className="p-4 border border-border rounded-lg bg-secondary">
+            <div className="font-medium mb-2 text-foreground">Записи встреч</div>
+            <div className="text-sm text-muted-foreground mb-3 break-all font-mono text-xs">
               {storageLocations?.recordings || 'Загружаю...'}
             </div>
             <button
               onClick={() => handleOpenFolder('recordings')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md bg-card text-foreground hover:bg-secondary transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               Открыть папку
@@ -213,15 +214,15 @@ export function PreferenceSettings() {
           </div>
         </div>
 
-        <div className="mt-4 p-3 bg-blue-50 rounded-md">
-          <p className="text-xs text-blue-800">
+        <div className="mt-4 p-3 bg-accent rounded-md">
+          <p className="text-xs text-accent-foreground">
             <strong>Примечание:</strong> База данных и модели хранятся вместе в папке приложения для удобства.
           </p>
         </div>
       </div>
 
       {/* Analytics Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
         <AnalyticsConsentSwitch />
       </div>
     </div>

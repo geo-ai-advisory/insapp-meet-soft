@@ -250,6 +250,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
     reset_speech_detected_flag(); // Reset for new recording session
+    // Пилюля-индикатор записи: показать в момент РЕАЛЬНОГО старта записи
+    // (привязка к настоящему состоянию, а не к фронтовым событиям).
+    crate::recording_indicator::show(&app);
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -440,6 +443,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
     reset_speech_detected_flag(); // Reset for new recording session
+    // Пилюля-индикатор записи: показать в момент РЕАЛЬНОГО старта записи
+    // (привязка к настоящему состоянию, а не к фронтовым событиям).
+    crate::recording_indicator::show(&app);
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -513,6 +519,9 @@ pub async fn stop_recording<R: Runtime>(
         info!("Recording was not active");
         return Ok(());
     }
+
+    // Пилюля-индикатор: закрыть сразу, как только запись начали останавливать.
+    crate::recording_indicator::hide(&app);
 
     // Emit shutdown progress to frontend
     let _ = app.emit(

@@ -61,6 +61,16 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       );
       setMeetings(updatedMeetings);
       setCurrentMeeting({ id: meeting.id, title: meetingTitle });
+
+      // Синк нового названия на сервер: переотправляем встречу по id - дашборд
+      // обновит title по meeting_id (TranscriptEndpoints: transcript-загрузка обновляет title).
+      // Раньше api_save_meeting_title писал только в локальную БД -> на сервере название не менялось.
+      try {
+        await invokeTauri('insapp_upload_meeting_by_id', { meetingId: meeting.id });
+        console.log('[insapp-meet] meet: название синхронизировано на сервер');
+      } catch (e) {
+        console.warn('[insapp-meet] meet: не удалось синхронизировать название на сервер', e);
+      }
       return true;
     } catch (error) {
       console.error('Failed to save meeting title:', error);

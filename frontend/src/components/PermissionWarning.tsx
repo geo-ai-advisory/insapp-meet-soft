@@ -52,90 +52,54 @@ export function PermissionWarning({
   };
 
   return (
-    <div className="max-w-md mb-4 space-y-3">
-      {/* Combined Permission Warning - Show when either permission is missing */}
-      {(!hasMicrophone || !hasSystemAudio) && (
-        <Alert variant="destructive" className="border-amber-400 bg-amber-50">
-          <AlertTriangle className="h-5 w-5 text-amber-600" />
-          <AlertTitle className="text-amber-900 font-semibold">
-            <div className="flex items-center gap-2">
-              {!hasMicrophone && <Mic className="h-4 w-4" />}
-              {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? 'Нужны разрешения' : !hasMicrophone ? 'Нужно разрешение на микрофон' : 'Нужно разрешение на системный звук'}
-            </div>
-          </AlertTitle>
-          {/* Action Buttons */}
-          <div className="mt-4 flex flex-wrap gap-2">
+    <div className="mx-auto mb-4 max-w-2xl rounded-2xl border border-border bg-secondary px-5 py-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+          <AlertTriangle className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-foreground">
+            {!hasMicrophone && !hasSystemAudio
+              ? 'Нужен доступ к звуку'
+              : !hasMicrophone
+                ? 'Нужен доступ к микрофону'
+                : 'Нужен доступ к системному звуку'}
+          </h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+            {!hasMicrophone
+              ? 'Чтобы записывать встречи, разреши Insapp-meet доступ к микрофону в системных настройках.'
+              : 'Чтобы записать звук собеседников, разреши запись экрана. Иначе в запись попадёт только твой микрофон.'}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
             {isMacOS && !hasMicrophone && (
               <button
                 onClick={openMicrophoneSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-[13px] font-medium text-primary-foreground transition-[filter] hover:brightness-105"
               >
                 <Mic className="h-4 w-4" />
-                Открыть настройки микрофона
+                Настройки микрофона
               </button>
             )}
             {isMacOS && !hasSystemAudio && (
               <button
                 onClick={openScreenRecordingSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-secondary"
               >
                 <Speaker className="h-4 w-4" />
-                Открыть настройки записи экрана
+                Запись экрана
               </button>
             )}
             <button
               onClick={onRecheck}
               disabled={isRechecking}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
               Проверить ещё раз
             </button>
           </div>
-          <AlertDescription className="text-amber-800 mt-2">
-            {/* Microphone Warning */}
-            {!hasMicrophone && (
-              <>
-                <p className="mb-3">
-                  Insapp-meet нужен доступ к микрофону, чтобы записывать встречи. Микрофон не обнаружен.
-                </p>
-                <div className="space-y-2 text-sm mb-4">
-                  <p className="font-medium">Проверь:</p>
-                  <ul className="list-disc list-inside ml-2 space-y-1">
-                    <li>Микрофон подключён и включён</li>
-                    <li>В Системных настройках выдано разрешение на микрофон</li>
-                    <li>Микрофон не занят другой программой</li>
-                  </ul>
-                </div>
-              </>
-            )}
-
-            {/* System Audio Warning */}
-            {!hasSystemAudio && (
-              <>
-                <p className="mb-3">
-                  {hasMicrophone
-                    ? 'Захват системного звука недоступен. Записать можно только с микрофона - звук с компьютера не попадёт в запись.'
-                    : 'Захват системного звука тоже недоступен.'}
-                </p>
-                {isMacOS && (
-                  <div className="space-y-2 text-sm mb-4">
-                    <p className="font-medium">Чтобы включить системный звук на macOS:</p>
-                    <ul className="list-disc list-inside ml-2 space-y-1">
-                      <li>Установи виртуальное аудио-устройство (например BlackHole 2ch)</li>
-                      <li>Дай Insapp-meet разрешение на запись экрана</li>
-                      <li>Настрой маршрутизацию звука в Audio MIDI Setup</li>
-                    </ul>
-                  </div>
-                )}
-              </>
-            )}
-
-
-          </AlertDescription>
-        </Alert>
-      )}
+        </div>
+      </div>
     </div>
   );
 }

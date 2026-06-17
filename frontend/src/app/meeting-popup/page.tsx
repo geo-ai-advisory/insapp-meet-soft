@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { Mic, X } from "lucide-react";
+import { Video, X } from "lucide-react";
 
 interface PopupData {
   app_name: string;
@@ -22,12 +22,13 @@ export default function MeetingPopupPage() {
   const [data, setData] = useState<PopupData | null>(null);
 
   useEffect(() => {
-    // Белый сплошной фон html/body. Никаких transparent — раньше попап
-    // был полупрозрачным и Telegram было видно через него.
+    // ПРОЗРАЧНЫЙ фон окна (html/body), чтобы углы за border-radius карточки не
+    // заливались квадратной подложкой. Сплошной светлый фон несёт сама карточка
+    // ниже (div с background --card + тень). Окно создано с transparent=true.
     const styleEl = document.createElement("style");
     styleEl.textContent = `
-      html, body { background: #ffffff !important; margin: 0; padding: 0; overflow: hidden; height: 100vh; width: 100vw; }
-      #__next, body > div { background: #ffffff !important; }
+      html, body { background: transparent !important; margin: 0; padding: 0; overflow: hidden; height: 100vh; width: 100vw; }
+      #__next, body > div { background: transparent !important; }
     `;
     document.head.appendChild(styleEl);
 
@@ -65,6 +66,7 @@ export default function MeetingPopupPage() {
   };
 
   const handleRecord = async () => {
+    console.log('[insapp-meet] popup: запись подтверждена (' + (data?.app_name ?? "неизвестно") + ')');
     try {
       await invoke("meeting_popup_record", { bundleId: data?.bundle_id ?? "" });
     } catch (e) {
@@ -74,6 +76,7 @@ export default function MeetingPopupPage() {
   };
 
   const handleDismiss = async () => {
+    console.log('[insapp-meet] popup: предложение отклонено (' + (data?.app_name ?? "неизвестно") + ')');
     try {
       await invoke("meeting_popup_dismiss", { bundleId: data?.bundle_id ?? "", name: data?.app_name ?? "" });
     } catch (e) {
@@ -83,49 +86,64 @@ export default function MeetingPopupPage() {
   };
 
   return (
+    // Прозрачная подложка во весь размер окна; карточка по центру, вокруг неё
+    // прозрачный гаттер (12px) для мягкой тени — углы окна не дают квадратной рамки.
+    <div
+      style={{
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "transparent",
+        boxSizing: "border-box",
+      }}
+    >
     <div
       style={{
         width: "360px",
         height: "96px",
         boxSizing: "border-box",
-        background: "#ffffff",
+        background: "hsl(var(--card))",
       }}
-      className="border border-gray-200 rounded-xl shadow-lg px-3 py-2 flex flex-col justify-between gap-1.5"
+      className="border border-border rounded-xl shadow-lg px-3 py-2 flex flex-col justify-between gap-1.5"
     >
       <div className="flex items-center gap-2.5">
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-red-50 flex items-center justify-center">
-          <Mic className="w-3.5 h-3.5 text-red-500" />
+        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[hsl(var(--brand-blue))]/10 flex items-center justify-center">
+          <Video className="w-[18px] h-[18px] text-[hsl(var(--brand-blue))]" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 leading-tight truncate">
-            Похоже у тебя встреча
+          <p className="text-sm font-semibold text-foreground leading-tight truncate">
+            Похоже, у вас встреча{data?.app_name ? ` в ${data.app_name}` : ''}
           </p>
-          <p className="text-xs text-gray-600 leading-tight truncate">
-            {data?.app_name ?? "Видеосвязь"} — записать?
+          <p className="text-xs text-muted-foreground leading-tight truncate">
+            Записать её автоматически?
           </p>
         </div>
         <button
           onClick={handleDismiss}
-          className="flex-shrink-0 p-0.5 hover:bg-gray-100 rounded transition-colors"
+          className="flex-shrink-0 p-0.5 hover:bg-secondary rounded transition-colors"
           aria-label="Закрыть"
         >
-          <X className="w-4 h-4 text-gray-400" />
+          <X className="w-4 h-4 text-muted-foreground" />
         </button>
       </div>
       <div className="flex gap-1.5">
         <button
           onClick={handleRecord}
-          className="flex-1 h-7 px-2 bg-red-500 hover:bg-red-600 text-white text-xs font-medium rounded-md transition-colors"
+          className="flex-1 inline-flex items-center justify-center gap-1.5 h-7 px-2 bg-primary hover:brightness-105 text-primary-foreground text-xs font-medium rounded-md transition-[filter] active:scale-[0.98]"
         >
-          Да, записать
+          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+          Записать
         </button>
         <button
           onClick={handleDismiss}
-          className="h-7 px-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-md transition-colors"
+          className="h-7 px-2 bg-secondary hover:bg-accent text-secondary-foreground text-xs font-medium rounded-md transition-colors active:scale-[0.98]"
         >
           Игнорировать
         </button>
       </div>
+    </div>
     </div>
   );
 }

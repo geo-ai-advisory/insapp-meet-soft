@@ -22,6 +22,7 @@ function ApiKeyInput({ onSaved }: { onSaved: () => Promise<void> }) {
     }
     setIsSaving(true);
     try {
+      console.log('[insapp-meet] settings: сохранение API-ключа Insapp');
       await invoke("insapp_set_api_key", { apiKey: trimmed });
       toast.success("API-ключ сохранён");
       setValue("");
@@ -40,7 +41,7 @@ function ApiKeyInput({ onSaved }: { onSaved: () => Promise<void> }) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Вставь сюда API-ключ от сервера Insapp"
-        className="flex-1 px-3 py-2 border border-gray-300 rounded-md font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="flex-1 px-3 py-2 border border-border bg-card text-foreground rounded-md font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
         onKeyDown={(e) => {
           if (e.key === "Enter") handleSave();
         }}
@@ -48,7 +49,7 @@ function ApiKeyInput({ onSaved }: { onSaved: () => Promise<void> }) {
       <button
         type="button"
         onClick={() => setShowKey((v) => !v)}
-        className="text-xs text-gray-500 hover:text-gray-700 px-2"
+        className="text-xs text-muted-foreground hover:text-foreground px-2"
       >
         {showKey ? "Скрыть" : "Показать"}
       </button>
@@ -94,6 +95,7 @@ function RegistrationBlock({
     }
     setIsRegistering(true);
     try {
+      console.log('[insapp-meet] settings: регистрация на сервере Insapp');
       await invoke<{ login: string }>("insapp_register_with_server", {
         login: login.trim(),
         password,
@@ -115,20 +117,20 @@ function RegistrationBlock({
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <p className="text-sm text-gray-600 mb-0.5">Ты вошёл как</p>
-            <p className="text-base font-semibold text-gray-900">{status.full_name || "—"}</p>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-sm text-muted-foreground mb-0.5">Ты вошёл как</p>
+            <p className="text-base font-semibold text-foreground">{status.full_name || "—"}</p>
+            <p className="text-xs text-muted-foreground mt-1">
               Встречи на сервере подписаны этой учёткой.
             </p>
           </div>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-muted-foreground">
             Ключ:{" "}
-            <code className="px-1.5 py-0.5 bg-gray-100 rounded font-mono">
+            <code className="px-1.5 py-0.5 bg-secondary rounded font-mono">
               {status.api_key_preview}
             </code>
           </p>
         </div>
-        <p className="text-xs text-gray-500 mb-2">Сменить учётку - войти под другим логином:</p>
+        <p className="text-xs text-muted-foreground mb-2">Сменить учётку - войти под другим логином:</p>
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -136,7 +138,7 @@ function RegistrationBlock({
             onChange={(e) => setLogin(e.target.value)}
             placeholder="логин"
             autoComplete="username"
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 px-3 py-2 border border-border bg-card text-foreground rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <input
             type="password"
@@ -144,7 +146,7 @@ function RegistrationBlock({
             onChange={(e) => setPassword(e.target.value)}
             placeholder="пароль"
             autoComplete="current-password"
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 px-3 py-2 border border-border bg-card text-foreground rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             onKeyDown={(e) => { if (e.key === "Enter") handleRegister(); }}
           />
           <Button variant="outline" onClick={handleRegister} disabled={isRegistering || login.trim().length < 2 || !password}>
@@ -158,7 +160,7 @@ function RegistrationBlock({
 
   return (
     <div>
-      <p className="text-sm text-gray-600 mb-3">
+      <p className="text-sm text-muted-foreground mb-3">
         Войди под своей учётной записью - тем же логином и паролем, что для
         дашборда. Сервер выдаст ключ, привязанный к твоей учётке.
       </p>
@@ -169,7 +171,7 @@ function RegistrationBlock({
           onChange={(e) => setLogin(e.target.value)}
           placeholder="логин (например geom)"
           autoComplete="username"
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 px-3 py-2 border border-border bg-card text-foreground rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <input
           type="password"
@@ -177,7 +179,7 @@ function RegistrationBlock({
           onChange={(e) => setPassword(e.target.value)}
           placeholder="пароль"
           autoComplete="current-password"
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 px-3 py-2 border border-border bg-card text-foreground rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           onKeyDown={(e) => { if (e.key === "Enter") handleRegister(); }}
         />
         <Button onClick={handleRegister} disabled={isRegistering || login.trim().length < 2 || !password}>
@@ -223,6 +225,7 @@ export function InsappServerSettings() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      console.log('[insapp-meet] settings: сохранение настроек сервера Insapp');
       await invoke("insapp_save_settings", {
         serverUrl: serverUrl.trim(),
         autoUpload,
@@ -308,7 +311,7 @@ export function InsappServerSettings() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-gray-500 p-6">
+      <div className="flex items-center gap-2 text-muted-foreground p-6">
         <Loader2 className="w-4 h-4 animate-spin" />
         Загружаю настройки сервера...
       </div>
@@ -321,19 +324,19 @@ export function InsappServerSettings() {
       <NotificationPermissionCard />
 
       {/* Статус подключения */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             {status?.server_reachable === true ? (
-              <Cloud className="w-6 h-6 text-green-600" />
+              <Cloud className="w-6 h-6 text-green-600 dark:text-green-400" />
             ) : status?.server_reachable === false ? (
-              <CloudOff className="w-6 h-6 text-red-500" />
+              <CloudOff className="w-6 h-6 text-destructive" />
             ) : (
-              <CloudCog className="w-6 h-6 text-gray-400" />
+              <CloudCog className="w-6 h-6 text-muted-foreground" />
             )}
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Корпоративный сервер Insapp</h3>
-              <p className="text-sm text-gray-600">
+              <h3 className="text-lg font-semibold text-foreground">Корпоративный сервер Insapp</h3>
+              <p className="text-sm text-muted-foreground">
                 {status?.server_reachable === true
                   ? "Сервер доступен - встречи уходят сразу"
                   : status?.server_reachable === false
@@ -348,8 +351,8 @@ export function InsappServerSettings() {
         </div>
 
         {status && status.queue_size > 0 && (
-          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md flex items-center justify-between">
-            <p className="text-sm text-amber-800">
+          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-900 rounded-md flex items-center justify-between">
+            <p className="text-sm text-amber-800 dark:text-amber-300">
               В очереди ждут отправки: <strong>{status.queue_size}</strong>
             </p>
             <Button
@@ -370,7 +373,7 @@ export function InsappServerSettings() {
 
         {status?.is_registered && (
           <div className="mt-3 flex items-center justify-between gap-3">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-muted-foreground">
               Перенести все встречи с этого компьютера на сервер
             </p>
             <Button
@@ -391,12 +394,12 @@ export function InsappServerSettings() {
       </div>
 
       {/* Адрес сервера */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
         <div className="flex items-start gap-3 mb-4">
-          <Server className="w-5 h-5 text-gray-600 mt-0.5" />
+          <Server className="w-5 h-5 text-muted-foreground mt-0.5" />
           <div className="flex-1">
-            <h3 className="text-base font-semibold text-gray-900 mb-1">Адрес сервера</h3>
-            <p className="text-sm text-gray-600 mb-3">
+            <h3 className="text-base font-semibold text-foreground mb-1">Адрес сервера</h3>
+            <p className="text-sm text-muted-foreground mb-3">
               Куда отправлять транскрипты. По умолчанию - https://test-meet-dashboard.insapp.pro
             </p>
             <input
@@ -404,15 +407,15 @@ export function InsappServerSettings() {
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
               placeholder="https://test-meet-dashboard.insapp.pro"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-border bg-card text-foreground rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
         </div>
 
-        <div className="mt-4 flex items-center justify-between border-t pt-4">
+        <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
           <div>
-            <p className="font-medium text-gray-900">Автоматически отправлять</p>
-            <p className="text-sm text-gray-600">Загружать транскрипт на сервер сразу после встречи</p>
+            <p className="font-medium text-foreground">Автоматически отправлять</p>
+            <p className="text-sm text-muted-foreground">Загружать транскрипт на сервер сразу после встречи</p>
           </div>
           <Switch checked={autoUpload} onCheckedChange={setAutoUpload} />
         </div>
@@ -426,11 +429,11 @@ export function InsappServerSettings() {
       </div>
 
       {/* Регистрация / кто вошёл */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
         <div className="flex items-start gap-3">
-          <UserCircle className="w-5 h-5 text-gray-600 mt-0.5" />
+          <UserCircle className="w-5 h-5 text-muted-foreground mt-0.5" />
           <div className="flex-1">
-            <h3 className="text-base font-semibold text-gray-900 mb-3">
+            <h3 className="text-base font-semibold text-foreground mb-3">
               {status?.is_registered ? "Учётная запись" : "Регистрация на сервере"}
             </h3>
             <RegistrationBlock status={status} onChanged={loadStatus} />
@@ -439,8 +442,8 @@ export function InsappServerSettings() {
       </div>
 
       {/* Ручной ввод ключа - для редких случаев когда админ выдал ключ напрямую */}
-      <details className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <summary className="flex items-center gap-3 cursor-pointer text-sm text-gray-500 hover:text-gray-700">
+      <details className="bg-card rounded-lg border border-border p-6 shadow-sm">
+        <summary className="flex items-center gap-3 cursor-pointer text-sm text-muted-foreground hover:text-foreground">
           <KeyRound className="w-4 h-4" />
           Ввести API-ключ вручную (если выдал админ)
         </summary>

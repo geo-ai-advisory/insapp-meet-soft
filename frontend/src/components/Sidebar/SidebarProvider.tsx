@@ -66,7 +66,7 @@ export const useSidebar = () => {
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ Новая встреча' });
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false); // развёрнут по умолчанию (как в референсе WhyNote)
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
@@ -89,9 +89,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
         const transformedMeetings = meetings.map((meeting: any) => ({
           id: meeting.id,
-          title: meeting.title
+          title: meeting.title,
+          // сохраняем дату создания, тип, длительность и превью - нужны главной (таблица/статы)
+          created_at: meeting.created_at,
+          meeting_type: meeting.meeting_type,
+          duration: meeting.duration,
+          preview: meeting.preview,
         }));
-        setMeetings(transformedMeetings);
+        setMeetings(transformedMeetings as any);
         Analytics.trackBackendConnection(true);
       } catch (error) {
         console.error('Error fetching meetings:', error);

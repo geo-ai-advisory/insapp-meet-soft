@@ -32,6 +32,10 @@ interface TranscriptPanelProps {
   // Тоггл правого блока резюме
   summaryVisible?: boolean;
   onToggleSummary?: () => void;
+
+  /** Это экран встречи -> пустой транскрипт показывает «ничего не записано» + удалить. */
+  isMeetingView?: boolean;
+  onDeleteMeeting?: () => void;
 }
 
 export function TranscriptPanel({
@@ -54,6 +58,8 @@ export function TranscriptPanel({
   onRefetchTranscripts,
   summaryVisible,
   onToggleSummary,
+  isMeetingView,
+  onDeleteMeeting,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -72,26 +78,14 @@ export function TranscriptPanel({
 
   return (
     <div
-      className={`hidden md:flex min-w-0 bg-white flex-col relative ${
+      className={`hidden md:flex min-w-0 bg-card text-foreground flex-col relative ${
         summaryVisible === false
           ? 'flex-1'
-          : 'md:w-1/4 lg:w-1/3 shrink-0 border-r border-gray-200'
+          : 'md:w-1/4 lg:w-1/3 shrink-0 border-r border-border'
       }`}
     >
-      {/* Title area - фикс высота h-16 (как у панели резюме) чтобы
-          разделительные линии обеих колонок были на одном уровне. */}
-      <div className="flex items-center h-16 px-4 border-b border-gray-200 shrink-0">
-        <TranscriptButtonGroup
-          transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
-          onCopyTranscript={onCopyTranscript}
-          onOpenMeetingFolder={onOpenMeetingFolder}
-          meetingId={meetingId}
-          meetingFolderPath={meetingFolderPath}
-          onRefetchTranscripts={onRefetchTranscripts}
-          summaryVisible={summaryVisible}
-          onToggleSummary={onToggleSummary}
-        />
-      </div>
+      {/* Панель «Скопировать/Папка» над транскриптом убрана - это был дубль действий
+          из шапки встречи. По макету транскрипт начинается сразу под вкладками. */}
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
@@ -109,15 +103,17 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          isMeetingView={isMeetingView}
+          onDeleteMeeting={onDeleteMeeting}
         />
       </div>
 
       {/* Custom prompt input at bottom of transcript section */}
       {!isRecording && convertedSegments.length > 0 && (
-        <div className="p-1 border-t border-gray-200">
+        <div className="p-1 border-t border-border">
           <textarea
             placeholder="Добавь контекст для AI-резюме: участники, цель встречи, краткое описание..."
-            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
+            className="w-full px-3 py-2 border border-border rounded-md text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring bg-card shadow-sm min-h-[80px] resize-y"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}
           />

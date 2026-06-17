@@ -329,11 +329,21 @@ pub async fn ai_summary_start<R: Runtime>(
     env.insert("INSAPP_MEETING_TITLE".to_string(), title.clone());
     env.insert("INSAPP_SUMMARY_OUTPUT".to_string(), output_file.to_string_lossy().to_string());
 
+    // Изолированный cwd для pty: папка данных приложения (app_data_dir =
+    // <dirs::data_dir()>/tech.insap.meet), а НЕ домашняя/"/". Без явного cwd
+    // shell+claude стартуют в cwd GUI-процесса (HOME или "/") и обращаются к
+    // защищённым папкам (~/Desktop, ~/Documents, ~/Downloads, ~/Pictures), из-за
+    // чего macOS сыпет TCC-запросами доступа. Для AI-резюме нужен только temp-файл
+    // транскрипта, поэтому стартуем процесс в безопасной app-папке.
+    // app_data уже существует (выше create_dir_all для подпапок temp/summaries).
+    std::fs::create_dir_all(&app_data).map_err(|e| format!("mkdir app_data: {}", e))?;
+    let pty_cwd = Some(app_data.to_string_lossy().to_string());
+
     let session_id = state_pty.spawn(
         app.clone(),
         cmd.clone(),
         args.clone(),
-        None,
+        pty_cwd,
         cols,
         rows,
         env,

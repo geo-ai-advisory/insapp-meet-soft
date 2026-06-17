@@ -92,8 +92,8 @@ export function SummarySyncBadge({
       clickable = true;
       break;
     case "disabled":
-      bg = "bg-gray-50 hover:bg-gray-100 border-gray-200";
-      textColor = "text-gray-600";
+      bg = "bg-background hover:bg-secondary border-border";
+      textColor = "text-muted-foreground";
       icon = <CloudOff className="w-4 h-4" />;
       tooltip = "Авто-отправка выключена - клик чтобы отправить разово";
       clickable = true;

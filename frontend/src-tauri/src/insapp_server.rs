@@ -75,6 +75,8 @@ pub struct TranscriptMeta {
     pub language: Option<String>,
     pub source: String,
     pub kind: String,
+    /// Тип встречи: 'internal' | 'external'. Дашборд читает это поле из meta.
+    pub meeting_type: String,
 }
 
 impl TranscriptMeta {
@@ -88,6 +90,8 @@ impl TranscriptMeta {
             language: None,
             source: "insapp-meet".to_string(),
             kind: "transcript".to_string(),
+            // По умолчанию внутренняя; реальный тип проставляется на сайте загрузки из встречи.
+            meeting_type: "internal".to_string(),
         }
     }
 }

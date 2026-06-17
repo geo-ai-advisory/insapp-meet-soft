@@ -52,9 +52,9 @@ export function About() {
                         className="mx-auto"
                     />
                 </div>
-                <h1 className="text-xl font-bold text-gray-900">Insapp-meet</h1>
-                <span className="text-sm text-gray-500"> v{currentVersion}</span>
-                <p className="text-medium text-gray-600 mt-1">
+                <h1 className="text-xl font-bold text-foreground">Insapp-meet</h1>
+                <span className="text-sm text-muted-foreground"> v{currentVersion}</span>
+                <p className="text-medium text-muted-foreground mt-1">
                     Корпоративный записчик встреч с локальной расшифровкой
                 </p>
                 <div className="mt-3">
@@ -87,30 +87,30 @@ export function About() {
 
             {/* Features Grid - Compact */}
             <div className="space-y-3">
-                <h2 className="text-base font-semibold text-gray-800">Что внутри</h2>
+                <h2 className="text-base font-semibold text-foreground">Что внутри</h2>
                 <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Полная приватность</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Все данные и AI-обработка остаются на твоём устройстве. Никакого облака, никаких утечек.</p>
+                    <div className="bg-background rounded p-3 hover:bg-secondary transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">Полная приватность</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">Все данные и AI-обработка остаются на твоём устройстве. Никакого облака, никаких утечек.</p>
                     </div>
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Любая модель</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Локальная open-source модель или внешнее API — без привязки к одному вендору.</p>
+                    <div className="bg-background rounded p-3 hover:bg-secondary transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">Любая модель</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">Локальная open-source модель или внешнее API — без привязки к одному вендору.</p>
                     </div>
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Без подписок</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Никаких ежемесячных оплат. Запускаешь модели локально или выбираешь облако только там где надо.</p>
+                    <div className="bg-background rounded p-3 hover:bg-secondary transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">Без подписок</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">Никаких ежемесячных оплат. Запускаешь модели локально или выбираешь облако только там где надо.</p>
                     </div>
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Где угодно</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Telemost, Zoom, Google Meet, Teams — онлайн и офлайн.</p>
+                    <div className="bg-background rounded p-3 hover:bg-secondary transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">Где угодно</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">Telemost, Zoom, Google Meet, Teams — онлайн и офлайн.</p>
                     </div>
                 </div>
             </div>
 
             {/* Footer - Compact */}
-            <div className="pt-2 border-t border-gray-200 text-center">
-                <p className="text-xs text-gray-400">
+            <div className="pt-2 border-t border-border text-center">
+                <p className="text-xs text-muted-foreground">
                     Insapp · построено на open-source ядре Meetily (MIT)
                 </p>
             </div>

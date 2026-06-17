@@ -50,6 +50,7 @@ pub mod pty_terminal;
 pub mod pty_terminal_commands;
 pub mod system_notify;
 pub mod meeting_popup;
+pub mod recording_indicator;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
@@ -650,6 +651,7 @@ pub fn run() {
             api::api_get_meeting_metadata,
             api::api_get_meeting_transcripts,
             api::api_save_meeting_title,
+            api::api_set_meeting_type,
             api::api_save_transcript,
             api::open_meeting_folder,
             api::test_backend_connection,
@@ -770,6 +772,9 @@ pub fn run() {
             meeting_popup::meeting_popup_request_data,
             meeting_popup::meeting_popup_record,
             meeting_popup::meeting_popup_dismiss,
+            // Плавающий индикатор записи (пилюля)
+            recording_indicator::recording_indicator_stop,
+            recording_indicator::recording_indicator_toggle_pause,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

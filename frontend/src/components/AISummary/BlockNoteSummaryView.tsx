@@ -85,6 +85,20 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const [isSaving, setIsSaving] = useState(false);
   const isContentLoaded = useRef(false);
 
+  // Тема BlockNote-редактора должна совпадать с темой приложения (класс .dark
+  // на <html>). Раньше было жёстко theme="light" - в тёмной теме редактор
+  // оставался белым. Чисто визуально: следим за классом, дефолт - светлая.
+  const [bnTheme, setBnTheme] = useState<'light' | 'dark'>('light');
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    const sync = () => setBnTheme(root.classList.contains('dark') ? 'dark' : 'light');
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
   // Create BlockNote editor for markdown parsing
   const editor = useCreateBlockNote({
     initialContent: undefined
@@ -120,64 +134,11 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   // родительского font-size. BlockNote устанавливает 3em на parent, и тогда
   // child 1.5em становится 4.5em = по-прежнему огромным.
   // rem = relative to root (16px), стабильный размер всегда.
-  useEffect(() => {
-    if (!editor) return;
-    const sizeByLevel: Record<string, string> = { "1": "1.5rem", "2": "1.25rem", "3": "1.1rem" };
-    const sizeByTag: Record<string, string> = { H1: "1.5rem", H2: "1.25rem", H3: "1.1rem" };
-
-    const apply = () => {
-      document
-        .querySelectorAll('[data-content-type="heading"], .bn-block-content[data-content-type="heading"]')
-        .forEach((el) => {
-          const level = el.getAttribute('data-level');
-          const size = level ? sizeByLevel[level] : null;
-          if (!size) return;
-          const html = el as HTMLElement;
-          html.style.setProperty('--level', size, 'important');
-          html.style.setProperty('font-size', size, 'important');
-        });
-      document.querySelectorAll('.bn-container h1, .bn-container h2, .bn-container h3').forEach((el) => {
-        const size = sizeByTag[el.tagName];
-        if (!size) return;
-        (el as HTMLElement).style.setProperty('font-size', size, 'important');
-      });
-      document.querySelectorAll('.bn-shadcn h1, .bn-shadcn h2, .bn-shadcn h3').forEach((el) => {
-        const size = sizeByTag[el.tagName];
-        if (!size) return;
-        (el as HTMLElement).style.setProperty('font-size', size, 'important');
-      });
-    };
-    apply();
-    // Вместо polling каждые 300мс (грузил CPU весь lifetime экрана) - реагируем
-    // на реальные изменения DOM редактора через MutationObserver, debounced
-    // через requestAnimationFrame. BlockNote перерисовывает блоки при правках -
-    // ловим только это, а не крутим querySelectorAll вхолостую.
-    let raf = 0;
-    const scheduleApply = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        apply();
-      });
-    };
-    const target = document.querySelector('.bn-container') || document.body;
-    const observer = new MutationObserver(scheduleApply);
-    observer.observe(target, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['data-level', 'class', 'data-content-type'],
-    });
-    // Пара отложенных применений на случай поздней инициализации редактора
-    const t1 = setTimeout(apply, 300);
-    const t2 = setTimeout(apply, 1000);
-    return () => {
-      observer.disconnect();
-      clearTimeout(t1);
-      clearTimeout(t2);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [editor, data]);
+  // Размеры заголовков AI-резюме задаёт ТОЛЬКО CSS (blocknote-heading-override.css, импорт выше):
+  // .bn-shadcn h1/h2/h3 + родительский div, всё через !important по каскаду.
+  // Прежний runtime-апплай через MutationObserver самозапускался на каждое изменение class/DOM
+  // редактора (курсор, выделение, ре-рендер блоков) и грузил CPU всё время, пока открыт экран
+  // резюме. Убран как избыточный - CSS-каскада достаточно, заголовки остаются правильного размера.
 
   // Set content loaded flag for blocknote format
   useEffect(() => {
@@ -344,7 +305,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
                 handleEditorChange(editor.document);
               }
             }}
-            theme="light"
+            theme={bnTheme}
           />
         </div>
       </div>

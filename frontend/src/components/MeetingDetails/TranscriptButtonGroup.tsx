@@ -80,8 +80,9 @@ export function TranscriptButtonGroup({
           <Button
             size="sm"
             variant="outline"
-            className={summaryVisible ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100' : ''}
+            className={summaryVisible ? 'bg-accent border-primary/30 text-accent-foreground hover:bg-accent' : ''}
             onClick={() => {
+              console.log('[insapp-meet] meet: tab-toggle-summary', summaryVisible ? 'hide' : 'show');
               Analytics.trackButtonClick('toggle_summary_panel', 'meeting_details');
               onToggleSummary();
             }}

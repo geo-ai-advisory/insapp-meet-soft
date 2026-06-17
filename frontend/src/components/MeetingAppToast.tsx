@@ -96,16 +96,16 @@ export function MeetingAppToast() {
 
   return (
     <div className="fixed top-6 right-6 z-50 w-80 animate-in slide-in-from-top-2 fade-in duration-200">
-      <div className="bg-white border border-gray-200 rounded-xl shadow-2xl p-4">
+      <div className="bg-card border border-border rounded-xl shadow-2xl p-4">
         <div className="flex items-start gap-3">
           <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
             <Mic className="w-5 h-5 text-red-500 stroke-[1.75]" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 leading-tight">
+            <p className="text-sm font-semibold text-foreground leading-tight">
               Кажется, у тебя встреча в&nbsp;{event.app_name}
             </p>
-            <p className="text-sm text-gray-600 mt-1">Записать?</p>
+            <p className="text-sm text-muted-foreground mt-1">Записать?</p>
             <div className="flex flex-col gap-2 mt-3">
               <Button variant="destructive" onClick={handleRecord} className="w-full">
                 <Mic />
@@ -123,11 +123,11 @@ export function MeetingAppToast() {
           </div>
           <button
             onClick={handleClose}
-            className="flex-shrink-0 p-1 hover:bg-gray-100 rounded-md transition-colors"
+            className="flex-shrink-0 p-1 hover:bg-secondary rounded-md transition-colors"
             aria-label="Закрыть"
             title="Закрыть"
           >
-            <X className="w-4 h-4 text-gray-400 stroke-[1.75]" />
+            <X className="w-4 h-4 text-muted-foreground stroke-[1.75]" />
           </button>
         </div>
       </div>

@@ -24,11 +24,11 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col items-center justify-center h-full p-8 text-center"
     >
-      <FileQuestion className="w-16 h-16 text-gray-300 mb-4" />
-      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+      <FileQuestion className="w-16 h-16 text-muted-foreground mb-4" />
+      <h3 className="text-lg font-semibold text-foreground mb-2">
         Резюме ещё не сделано
       </h3>
-      <p className="text-sm text-gray-500 mb-6 max-w-md">
+      <p className="text-sm text-muted-foreground mb-6 max-w-md">
         Сгенерируй AI-резюме встречи: ключевые моменты, решения и пункты к выполнению.
       </p>
 
