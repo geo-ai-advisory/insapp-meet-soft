@@ -401,6 +401,16 @@ pub fn get_language_preference_internal() -> Option<String> {
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
+    // Защита от цикла «краш -> macOS восстанавливает окна -> снова краш».
+    // Повреждённое сохранённое состояние окон (ловили после обновления macOS на старой
+    // версии) валило приложение при каждом старте, а авто-обновление не успевало сработать.
+    // Чистим saved-state при каждом запуске, чтобы единичный сбой не становился вечным.
+    #[cfg(target_os = "macos")]
+    if let Some(home) = dirs::home_dir() {
+        let saved = home.join("Library/Saved Application State/tech.insap.meet.savedState");
+        let _ = std::fs::remove_dir_all(&saved);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())

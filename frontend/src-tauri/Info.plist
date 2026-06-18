@@ -10,5 +10,9 @@
     <string>Insapp-meet записывает звук системы для расшифровки встреч.</string>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Не сохранять/восстанавливать окна при выходе: второй слой защиты от цикла
+         краш -> восстановление окон -> краш (основной слой - очистка saved-state в run()). -->
+    <key>NSQuitAlwaysKeepsWindows</key>
+    <false/>
 </dict>
 </plist>
