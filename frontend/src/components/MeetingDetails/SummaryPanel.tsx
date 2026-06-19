@@ -182,7 +182,11 @@ export function SummaryPanel({
   })();
 
   const transcriptSynced = transcripts.length > 0;
-  const summarySyncedToCloud = hasMarkdownSummary && syncStatus === 'synced';
+  // ВАЖНО: бэкенд и все остальные компоненты используют статус "sent" (см. SyncStatus
+  // в insapp_server + SummarySyncBadge/TerminalPanel/AiTerminalLauncher). Здесь была
+  // опечатка 'synced', из-за которой загруженное на сервер резюме всегда показывалось
+  // как «ещё не в облаке».
+  const summarySyncedToCloud = hasMarkdownSummary && syncStatus === 'sent';
 
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-card text-foreground overflow-hidden">
