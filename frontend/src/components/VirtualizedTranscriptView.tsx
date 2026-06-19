@@ -166,6 +166,19 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Force re-render without flushSync (avoids React warning)
     const [, rerender] = useReducer((x: number) => x + 1, 0);
 
+    // Подсказка про доступ к микрофону: если запись идёт, не на паузе, а реплик нет
+    // дольше ~12 сек - вероятно нет сигнала с микрофона. На Windows доступ к микрофону
+    // часто слетает после обновления, и раньше приложение это никак не показывало
+    // (немой экран «Слушаю речь...»). Теперь подсказываем и ведём в настройки.
+    const [showMicHint, setShowMicHint] = useState(false);
+    useEffect(() => {
+        if (isRecording && !isPaused && segments.length === 0) {
+            const t = setTimeout(() => setShowMicHint(true), 12000);
+            return () => clearTimeout(t);
+        }
+        setShowMicHint(false);
+    }, [isRecording, isPaused, segments.length]);
+
     // Setup virtualizer for efficient rendering of large lists
     const virtualizer = useVirtualizer({
         count: segments.length,
@@ -294,6 +307,21 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             <p className="text-xs mt-1 text-muted-foreground">
                                 {isPaused ? 'Нажми «Продолжить», чтобы возобновить запись' : 'Говори - расшифровка появится в реальном времени'}
                             </p>
+                            {showMicHint && !isPaused && (
+                                <div className="mt-5 mx-auto max-w-sm rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-left">
+                                    <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">Не слышу звук с микрофона</p>
+                                    <p className="text-[11px] mt-1 leading-relaxed text-amber-600 dark:text-amber-400/80">
+                                        Похоже, у приложения нет доступа к микрофону. После обновления системе иногда нужно разрешить его заново.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => { import('@tauri-apps/api/core').then(({ invoke }) => invoke('open_microphone_settings').catch(() => {})); }}
+                                        className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400 underline underline-offset-2 hover:opacity-80"
+                                    >
+                                        Открыть настройки микрофона
+                                    </button>
+                                </div>
+                            )}
                         </>
                     ) : isMeetingView ? (
                         /* Открыта пустая встреча: не было записано ни одной реплики.

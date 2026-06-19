@@ -735,6 +735,8 @@ pub fn run() {
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,
+            // Настройки доступа к микрофону (кроссплатформенно - Windows/macOS/Linux)
+            utils::open_microphone_settings,
             // Retranscription commands
             audio::retranscription::start_retranscription_command,
             audio::retranscription::cancel_retranscription_command,

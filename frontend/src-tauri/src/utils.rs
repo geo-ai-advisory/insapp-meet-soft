@@ -22,4 +22,37 @@ pub async fn open_system_settings(preference_pane: String) -> Result<(), String>
         .map_err(|e| format!("Failed to open system settings: {}", e))?;
 
     Ok(())
-} 
+}
+
+/// Открыть системные настройки доступа к микрофону (кроссплатформенно).
+/// Нужно, когда запись идёт, но звука с микрофона нет (после обновления Windows
+/// часто сбрасывает доступ к микрофону для классических приложений, а само
+/// приложение доступ программно не запрашивает). Ведём пользователя прямо в настройки.
+#[tauri::command]
+pub async fn open_microphone_settings() -> Result<(), String> {
+    use std::process::Command;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 10/11: Параметры → Конфиденциальность → Микрофон
+        Command::new("cmd")
+            .args(["/C", "start", "ms-settings:privacy-microphone"])
+            .spawn()
+            .map_err(|e| format!("Не удалось открыть настройки микрофона: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .spawn()
+            .map_err(|e| format!("Не удалось открыть настройки микрофона: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("xdg-open").arg("settings://privacy").spawn();
+    }
+
+    Ok(())
+}
