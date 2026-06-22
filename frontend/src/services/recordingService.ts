@@ -7,6 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { silenceDiagnostic } from './silenceDiagnostic';
 
 export interface RecordingState {
   is_recording: boolean;
@@ -56,6 +57,9 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async startRecording(): Promise<void> {
+    // Запускаем самодиагностику звука (копит уровни всю запись). Fire-and-forget,
+    // чтобы подписка на уровни не задерживала старт записи.
+    void silenceDiagnostic.start();
     return invoke('start_recording');
   }
 
@@ -71,6 +75,7 @@ export class RecordingService {
     systemDeviceName: string | null,
     meetingName: string
   ): Promise<void> {
+    void silenceDiagnostic.start();
     return invoke('start_recording_with_devices_and_meeting', {
       mic_device_name: micDeviceName,
       system_device_name: systemDeviceName,

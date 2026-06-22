@@ -303,6 +303,66 @@ pub async fn upload_transcript(
     Ok(SyncStatus::Pending)
 }
 
+/// Диагностика записи звука. Отправляется на сервер, когда за всю запись
+/// микрофон и/или система молчали (RMS остался около нуля) - то есть запись
+/// шла, но звук не захватывался. Это происходит без ошибки в приложении
+/// (частый случай на Windows после обновления: система молча отзывает доступ
+/// к микрофону у классических приложений). Диагностика позволяет увидеть
+/// проблему удалённо в дашборде, не требуя действий от пользователя.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDiagnostic {
+    pub app_version: String,
+    pub os: String,
+    pub mic_device: String,
+    pub system_device: String,
+    pub mic_max_rms: f32,
+    pub system_max_rms: f32,
+    pub mic_silent: bool,
+    pub system_silent: bool,
+    pub level_events: i64,
+    pub duration_sec: f64,
+    pub note: String,
+}
+
+/// Отправить диагностику записи звука на сервер. Тихо завершается успехом,
+/// если сервер недоступен (диагностика - не критичный путь, теряем молча).
+pub async fn send_diagnostic(
+    server_url: &str,
+    api_key: &str,
+    diag: &AudioDiagnostic,
+) -> Result<(), String> {
+    let url = format!("{}/api/v1/diagnostics", server_url.trim_end_matches('/'));
+    let body = serde_json::to_string(diag).map_err(|e| format!("diag serialize: {}", e))?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("client build: {}", e))?;
+
+    let resp = match client
+        .post(&url)
+        .header("X-Insapp-Api-Key", api_key)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("Диагностика не отправлена (сервер недоступен {}): {}", url, e);
+            return Ok(());
+        }
+    };
+
+    if resp.status().is_success() {
+        info!("Аудио-диагностика отправлена на {}", url);
+    } else {
+        warn!("Сервер вернул {} на диагностику", resp.status());
+    }
+    Ok(())
+}
+
 /// Запись в очереди sync_queue (отложенные отправки).
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct QueuedUpload {

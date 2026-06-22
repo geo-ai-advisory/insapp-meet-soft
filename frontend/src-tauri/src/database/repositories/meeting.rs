@@ -239,6 +239,42 @@ impl MeetingsRepository {
         Ok(rows_affected.rows_affected() > 0)
     }
 
+    /// Пометить встречу как локальную (true) или разрешённую к выгрузке (false).
+    /// Ставится при сохранении со снятой галочкой «Отправить в облако».
+    pub async fn set_cloud_opt_out(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        opt_out: bool,
+    ) -> Result<bool, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol("meeting_id cannot be empty".to_string()));
+        }
+        let value: i64 = if opt_out { 1 } else { 0 };
+        let rows_affected =
+            sqlx::query("UPDATE meetings SET cloud_opt_out = ? WHERE id = ?")
+                .bind(value)
+                .bind(meeting_id)
+                .execute(pool)
+                .await?;
+        Ok(rows_affected.rows_affected() > 0)
+    }
+
+    /// Прочитать признак локальности встречи (true = не выгружать на сервер).
+    pub async fn get_cloud_opt_out(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<bool, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol("meeting_id cannot be empty".to_string()));
+        }
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT cloud_opt_out FROM meetings WHERE id = ?")
+                .bind(meeting_id)
+                .fetch_optional(pool)
+                .await?;
+        Ok(row.map(|(v,)| v != 0).unwrap_or(false))
+    }
+
     pub async fn update_meeting_name(
         pool: &SqlitePool,
         meeting_id: &str,

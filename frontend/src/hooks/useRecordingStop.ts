@@ -10,6 +10,8 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
+import { getUploadOptIn } from '@/components/UploadOptInToggle';
+import { silenceDiagnostic } from '@/services/silenceDiagnostic';
 import Analytics from '@/lib/analytics';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
@@ -299,13 +301,23 @@ export function useRecordingStop(
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
 
+          // Самодиагностика звука: если за запись микрофон и/или система молчали,
+          // отправит диагностику на сервер (для удалённого разбора проблем со звуком,
+          // например на Windows). Fire-and-forget - не задерживаем сохранение.
+          void silenceDiagnostic.stopAndReport();
+
           // Тип встречи из окна сохранения (Внутренняя/Внешняя) -> backend + сервер.
           if (overrideType) {
             try {
               await invoke('api_set_meeting_type', { meetingId, meetingType: overrideType });
-              // Переотправляем встречу, чтобы тип ушёл на сервер (saveMeeting выше отправил
-              // с дефолтным типом; meta переотправки берёт актуальный тип из БД).
-              await invoke('insapp_upload_meeting_by_id', { meetingId });
+              // Переотправляем на сервер ТОЛЬКО если галочка «Отправить в облако» включена.
+              // Тип всегда сохраняется локально (api_set_meeting_type выше), но залив на
+              // сервер обязан уважать снятую галочку - иначе локальная встреча уходит в
+              // облако вопреки выбору пользователя (критбаг приватности: тип встречи всегда
+              // ставился overrideType -> эта переотправка грузила встречу всегда, мимо галочки).
+              if (getUploadOptIn()) {
+                await invoke('insapp_upload_meeting_by_id', { meetingId });
+              }
             } catch (e) {
               console.error('[insapp-meet] save: не удалось сохранить/синхронизировать тип', e);
             }

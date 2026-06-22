@@ -15,6 +15,10 @@ pub struct MeetingModel {
     /// Тип встречи: 'internal' (Внутренняя) | 'external' (Внешняя). По умолчанию 'internal'.
     #[sqlx(default)]
     pub meeting_type: Option<String>,
+    /// 1 = пользователь снял галочку «Отправить в облако», встреча остаётся локальной.
+    /// 0 = можно отправлять на сервер. Источник истины для всех путей загрузки.
+    #[sqlx(default)]
+    pub cloud_opt_out: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]

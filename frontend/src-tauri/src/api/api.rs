@@ -1057,6 +1057,11 @@ pub async fn api_save_transcript<R: Runtime>(
                     "Insapp server upload SKIPPED для встречи {} (галочка в UI снята)",
                     meeting_id
                 );
+                // Запоминаем выбор «локально» в БД: последующие правки названия/типа и
+                // AI-резюме НЕ должны залить эту встречу на сервер мимо снятой галочки.
+                if let Err(e) = crate::database::repositories::meeting::MeetingsRepository::set_cloud_opt_out(pool, &meeting_id, true).await {
+                    log_error!("Не удалось пометить встречу {} как локальную: {}", meeting_id, e);
+                }
                 crate::insapp_server::SyncStatus::Disabled
             } else {
                 crate::insapp_server_commands::try_upload_meeting(

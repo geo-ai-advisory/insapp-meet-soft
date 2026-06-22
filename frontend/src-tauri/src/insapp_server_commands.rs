@@ -342,6 +342,32 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
+    // Уважаем выбор пользователя «только локально»: если при сохранении галочка
+    // «Отправить в облако» была снята, встреча помечена cloud_opt_out=1 и НЕ должна
+    // уходить на сервер - ни при правке названия/типа, ни при AI-резюме, ни при
+    // переотправке после стопа. Единая точка защиты для всех вызовов команды.
+    match MeetingsRepository::get_cloud_opt_out(pool, &meeting_id).await {
+        Ok(true) => {
+            tracing::info!(
+                "[insapp_resend] meeting={} помечена как локальная (галочка снята) - выгрузка пропущена",
+                meeting_id
+            );
+            return Ok(serde_json::json!({
+                "status": "disabled",
+                "reason": "Встреча сохранена локально (галочка «Отправить в облако» снята)",
+                "meeting_id": meeting_id,
+            }));
+        }
+        Ok(false) => {}
+        Err(e) => {
+            // Не блокируем выгрузку из-за ошибки чтения флага - только логируем.
+            tracing::warn!(
+                "[insapp_resend] не удалось прочитать cloud_opt_out для {}: {}",
+                meeting_id, e
+            );
+        }
+    }
+
     // 1) Достаём встречу со всеми сегментами
     let meeting = MeetingsRepository::get_meeting(pool, &meeting_id)
         .await
@@ -566,4 +592,63 @@ pub async fn try_upload_meeting<R: Runtime>(
     .await;
     tracing::info!("[insapp_upload] result for {}: {:?}", meeting_id, result);
     result
+}
+
+/// Принять от фронта замеры уровня звука за прошедшую запись и, если звук
+/// не захватывался (микрофон и/или система молчали), отправить диагностику
+/// на сервер. Тихо выходит, если звук был нормальный или нет API-ключа.
+#[tauri::command]
+pub async fn send_audio_diagnostic(
+    state: State<'_, AppState>,
+    mic_device: String,
+    system_device: String,
+    mic_max_rms: f32,
+    system_max_rms: f32,
+    level_events: i64,
+    duration_sec: f64,
+) -> Result<(), String> {
+    // Порог тишины: ниже него считаем, что звука фактически не было.
+    const SILENCE_RMS: f32 = 0.001;
+    let mic_silent = mic_max_rms < SILENCE_RMS;
+    let system_silent = system_max_rms < SILENCE_RMS;
+
+    // Всё хорошо - хотя бы один источник дал звук. Ничего не шлём.
+    if !mic_silent && !system_silent {
+        return Ok(());
+    }
+
+    let api_key = insapp_server::get_api_key();
+    if api_key.is_empty() {
+        // Без ключа отправлять некуда - тихо выходим.
+        return Ok(());
+    }
+    let pool = state.db_manager.pool();
+    let settings = insapp_server::load_settings(pool).await;
+
+    let note = match (mic_silent, system_silent) {
+        (true, true) => "И микрофон, и системный звук молчали всю запись (звук не захватился)".to_string(),
+        (true, false) => "Микрофон молчал всю запись (системный звук был)".to_string(),
+        (false, true) => "Системный звук молчал всю запись (микрофон был)".to_string(),
+        _ => String::new(),
+    };
+
+    let diag = insapp_server::AudioDiagnostic {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        mic_device,
+        system_device,
+        mic_max_rms,
+        system_max_rms,
+        mic_silent,
+        system_silent,
+        level_events,
+        duration_sec,
+        note,
+    };
+
+    tracing::warn!(
+        "[audio_diag] тишина: mic_rms={:.5} sys_rms={:.5} events={} -> отправляю на сервер",
+        mic_max_rms, system_max_rms, level_events
+    );
+    insapp_server::send_diagnostic(&settings.server_url, &api_key, &diag).await
 }
