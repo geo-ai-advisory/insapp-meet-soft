@@ -42,7 +42,8 @@
           "description": "Main window capability with file system and media access",
           "windows": [
             "main",
-            "meeting-popup"
+            "meeting-popup",
+            "recording-indicator"
           ],
           "permissions": [
             "fs:default",
@@ -64,6 +65,7 @@
             "core:tray:default",
             "core:window:allow-set-title",
             "core:window:allow-close",
+            "core:window:allow-start-dragging",
             "core:window:allow-set-focus",
             "core:window:allow-show",
             "core:window:allow-hide",

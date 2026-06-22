@@ -78,15 +78,16 @@ export default function RecordingIndicatorPage() {
   return (
     <div
       data-tauri-drag-region
-      style={{ width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box", padding: "6px", background: "transparent", cursor: "grab" }}
+      style={{ width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box", padding: "0", background: "transparent" }}
     >
       <div
         data-tauri-drag-region
         style={{
-          width: "54px", height: "100%",
+          width: "54px", height: "198px",
           background: "linear-gradient(180deg, #2A2A2E 0%, #1A1A1C 100%)",
           border: "1px solid rgba(255,255,255,0.10)", borderRadius: "27px",
-          boxShadow: "0 10px 32px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.30)",
+          boxShadow: "0 6px 18px rgba(0,0,0,0.42), 0 2px 6px rgba(0,0,0,0.28)",
+          cursor: "grab",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between",
           padding: "12px 0", WebkitUserSelect: "none", userSelect: "none",
         }}

@@ -16,9 +16,11 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuild
 use tracing::{info, warn};
 
 const PILL_LABEL: &str = "recording-indicator";
-const PILL_WIDTH: f64 = 66.0;
-const PILL_HEIGHT: f64 = 210.0;
-const MARGIN_RIGHT: f64 = 18.0;
+// Окно крупнее самой капсулы (54x198): прозрачный запас по краям нужен, чтобы
+// тень капсулы не обрезалась прямоугольником окна (иначе видна «тень-квадрат»).
+const PILL_WIDTH: f64 = 92.0;
+const PILL_HEIGHT: f64 = 250.0;
+const MARGIN_RIGHT: f64 = 6.0;
 
 /// Показать пилюлю (вызывается при РЕАЛЬНОМ старте записи).
 pub fn show<R: Runtime>(app: &AppHandle<R>) {
