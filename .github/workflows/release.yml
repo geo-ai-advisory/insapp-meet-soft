@@ -172,9 +172,9 @@ jobs:
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           rm -rf stable && mkdir -p stable
-          gh release download "v${VERSION}" --pattern "*aarch64.dmg" --dir stable || true
-          gh release download "v${VERSION}" --pattern "*x64.dmg" --dir stable || true
-          gh release download "v${VERSION}" --pattern "*x64-setup.exe" --dir stable || true
+          gh release download "v${VERSION}" -R ${{ github.repository }} --pattern "*aarch64.dmg" --dir stable || true
+          gh release download "v${VERSION}" -R ${{ github.repository }} --pattern "*x64.dmg" --dir stable || true
+          gh release download "v${VERSION}" -R ${{ github.repository }} --pattern "*x64-setup.exe" --dir stable || true
           MAC=$(ls stable/*aarch64.dmg 2>/dev/null | head -1)
           INTEL=$(ls stable/*x64.dmg 2>/dev/null | head -1)
           WIN=$(ls stable/*x64-setup.exe 2>/dev/null | head -1)
