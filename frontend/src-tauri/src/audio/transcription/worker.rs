@@ -4,7 +4,7 @@
 
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
-use crate::audio::AudioChunk;
+use crate::audio::{AudioChunk, RecordingDeviceType};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -36,6 +36,9 @@ pub struct TranscriptUpdate {
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
+    // Источник речи: "mic" (микрофон = Вы) | "system" (система = Собеседник) |
+    // None (разделение спикеров выключено). Фронт превращает в подпись спикера.
+    pub speaker: Option<String>,
 }
 
 // NOTE: get_transcript_history and get_recording_meeting_name functions
@@ -143,6 +146,18 @@ pub fn start_transcription_task<R: Runtime>(
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
+                            // Источник речи для разметки спикера - сохраняем ДО перемещения
+                            // chunk в transcribe. "mic" = микрофон (Вы), "system" = система
+                            // (Собеседник). None - когда разделение спикеров выключено.
+                            let chunk_speaker: Option<String> = if crate::audio::pipeline::get_separate_speakers() {
+                                Some(match chunk.device_type {
+                                    RecordingDeviceType::Microphone => "mic".to_string(),
+                                    RecordingDeviceType::System => "system".to_string(),
+                                })
+                            } else {
+                                None
+                            };
+
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
                                 &engine_clone,
@@ -217,6 +232,7 @@ pub fn start_transcription_task<R: Runtime>(
                                             audio_start_time,
                                             audio_end_time,
                                             duration: chunk_duration,
+                                            speaker: chunk_speaker,
                                         };
 
                                         if let Err(e) = app_clone.emit("transcript-update", &update)

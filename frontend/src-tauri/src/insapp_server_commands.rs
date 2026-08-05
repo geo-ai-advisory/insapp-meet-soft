@@ -36,6 +36,7 @@ fn parse_markdown_to_segments(markdown: &str) -> Vec<crate::api::TranscriptSegme
                 audio_start_time: Some(secs),
                 audio_end_time: None,
                 duration: None,
+                speaker: None,
             });
         }
     }
@@ -385,6 +386,7 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
             audio_start_time: t.audio_start_time,
             audio_end_time: t.audio_end_time,
             duration: t.duration,
+            speaker: t.speaker.clone(),
         })
         .collect();
 
@@ -508,6 +510,7 @@ pub async fn insapp_upload_all_meetings<R: Runtime>(
                 audio_start_time: t.audio_start_time,
                 audio_end_time: t.audio_end_time,
                 duration: t.duration,
+                speaker: t.speaker.clone(),
             })
             .collect();
         if segments.is_empty() {

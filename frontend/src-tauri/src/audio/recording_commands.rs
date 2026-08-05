@@ -279,6 +279,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
                     confidence: update.confidence,
                     sequence_id: update.sequence_id,
+                    speaker: update.speaker.clone(),
                 };
 
                 // Save to recording manager
@@ -472,6 +473,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
                     confidence: update.confidence,
                     sequence_id: update.sequence_id,
+                    speaker: update.speaker.clone(),
                 };
 
                 // Save to recording manager
@@ -1244,4 +1246,18 @@ pub async fn attempt_device_reconnect(
             Err(e.to_string())
         }
     }
+}
+
+/// Включить/выключить разделение говорящих по каналам (микрофон = «Вы»,
+/// системный звук = «Собеседник»). Применяется к СЛЕДУЮЩЕЙ записи.
+#[tauri::command]
+pub fn set_separate_speakers(enabled: bool) {
+    info!("🎙️ Разделение спикеров переключено: {}", enabled);
+    crate::audio::pipeline::set_separate_speakers(enabled);
+}
+
+/// Текущее состояние разделения говорящих по каналам.
+#[tauri::command]
+pub fn get_separate_speakers() -> bool {
+    crate::audio::pipeline::get_separate_speakers()
 }

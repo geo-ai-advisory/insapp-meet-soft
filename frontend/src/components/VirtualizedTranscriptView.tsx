@@ -87,6 +87,15 @@ function speakerColorByIndex(index: number): string {
     return SPEAKER_COLOR_CLASSES[index % SPEAKER_COLOR_CLASSES.length];
 }
 
+// Подпись спикера: "mic" (канал микрофона) = «Вы», "system" (системный звук) =
+// «Собеседник». Прочие значения (напр. от будущей диаризации) - как есть.
+function speakerLabel(sp?: string): string | undefined {
+    if (!sp) return undefined;
+    if (sp === 'mic') return 'Вы';
+    if (sp === 'system') return 'Собеседник';
+    return sp;
+}
+
 // Memoized transcript segment component
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
@@ -383,7 +392,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         id={segment.id}
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
-                                        speaker={(segment as any).speaker}
+                                        speaker={speakerLabel((segment as any).speaker)}
                                         speakerColor={colorFor((segment as any).speaker)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
@@ -441,7 +450,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         id={segment.id}
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
-                                        speaker={(segment as any).speaker}
+                                        speaker={speakerLabel((segment as any).speaker)}
                                         speakerColor={colorFor((segment as any).speaker)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
