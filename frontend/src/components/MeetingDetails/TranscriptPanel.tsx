@@ -73,6 +73,9 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      // Подпись говорящего («Вы» / «Собеседник N») - иначе на экране встречи
+      // без постраничной загрузки участники не показывались.
+      speaker: (t as any).speaker,
     }));
   }, [transcripts, usePagination, segments]);
 

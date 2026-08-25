@@ -45,6 +45,9 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      // Кто говорит - показываем подпись («Вы» / «Собеседник N») уже во время записи,
+      // а не только после сохранения встречи.
+      speaker: t.speaker,
     })),
     [transcripts]
   );

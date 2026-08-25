@@ -221,6 +221,14 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('api_set_speaker_name', { meetingId, speakerKey: key, displayName: name.trim() });
+            // Обновляем встречу на сервере, иначе в дашборде и по ссылке
+            // «Поделиться» осталась бы прежняя подпись («Собеседник 1»).
+            // Встречи, помеченные «только локально», команда не тронет.
+            try {
+                await invoke('insapp_upload_meeting_by_id', { meetingId });
+            } catch (e) {
+                console.warn('[insapp-meet] имя сохранено локально, на сервере обновится позже', e);
+            }
         } catch (e) {
             console.warn('[insapp-meet] не удалось сохранить имя участника', e);
         }
