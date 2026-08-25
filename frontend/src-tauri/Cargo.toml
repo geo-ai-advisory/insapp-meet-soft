@@ -1,6 +1,6 @@
 [package]
 name = "meetily"
-version = "0.3.9"
+version = "0.4.0"
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"
@@ -108,6 +108,7 @@ silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", 
 
 # Parakeet (ONNX-based fast transcription) dependencies
 ort = { version = "2.0.0-rc.10" }  # ONNX Runtime for Parakeet models
+pyannote-rs = "0.3.4"  # Диаризация: кто говорит (segmentation-3.0 + wespeaker, тот же ort)
 thiserror = "2.0.16"                # Error handling for Parakeet
 
 # Async

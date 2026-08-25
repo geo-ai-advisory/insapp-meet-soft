@@ -87,12 +87,16 @@ function speakerColorByIndex(index: number): string {
     return SPEAKER_COLOR_CLASSES[index % SPEAKER_COLOR_CLASSES.length];
 }
 
-// Подпись спикера: "mic" (канал микрофона) = «Вы», "system" (системный звук) =
-// «Собеседник». Прочие значения (напр. от будущей диаризации) - как есть.
+// Подпись спикера:
+//   "mic"       - канал микрофона            -> «Вы»
+//   "system"    - собеседник не распознан    -> «Собеседник»
+//   "system_N"  - распознанный собеседник N  -> «Собеседник N»
 function speakerLabel(sp?: string): string | undefined {
     if (!sp) return undefined;
     if (sp === 'mic') return 'Вы';
     if (sp === 'system') return 'Собеседник';
+    const guest = /^system_(\d+)$/.exec(sp);
+    if (guest) return `Собеседник ${guest[1]}`;
     return sp;
 }
 

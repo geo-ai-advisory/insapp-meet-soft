@@ -104,6 +104,19 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     }
     info!("✅ Transcription model validation passed");
 
+    // Распознавание говорящих: сбрасываем голоса прошлой встречи и готовим модель.
+    // Подготовка идёт ФОНОМ - запись начинается сразу, не ожидая загрузки модели
+    // (~27 МБ при первом запуске). Пока модель не готова, реплики собеседников
+    // подписываются общим «Собеседник», после готовности - «Собеседник 1/2/...».
+    crate::audio::diarization::reset();
+    if crate::audio::diarization::get_diarize_guests() {
+        tauri::async_runtime::spawn(async {
+            if let Err(e) = crate::audio::diarization::init().await {
+                warn!("[diarization] распознавание говорящих недоступно: {}", e);
+            }
+        });
+    }
+
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
 
@@ -354,6 +367,19 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+
+    // Распознавание говорящих: сбрасываем голоса прошлой встречи и готовим модель.
+    // Подготовка идёт ФОНОМ - запись начинается сразу, не ожидая загрузки модели
+    // (~27 МБ при первом запуске). Пока модель не готова, реплики собеседников
+    // подписываются общим «Собеседник», после готовности - «Собеседник 1/2/...».
+    crate::audio::diarization::reset();
+    if crate::audio::diarization::get_diarize_guests() {
+        tauri::async_runtime::spawn(async {
+            if let Err(e) = crate::audio::diarization::init().await {
+                warn!("[diarization] распознавание говорящих недоступно: {}", e);
+            }
+        });
+    }
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -652,6 +678,9 @@ pub async fn stop_recording<R: Runtime>(
     );
 
     info!("🧠 All transcript chunks processed. Now safely unloading transcription model...");
+
+    // Освобождаем и модель распознавания говорящих - все реплики уже размечены.
+    crate::audio::diarization::unload();
 
     // Determine which provider was used and unload the appropriate model (with timeout)
     let config = match tokio::time::timeout(
@@ -1260,4 +1289,21 @@ pub fn set_separate_speakers(enabled: bool) {
 #[tauri::command]
 pub fn get_separate_speakers() -> bool {
     crate::audio::pipeline::get_separate_speakers()
+}
+
+/// Включить/выключить различение собеседников между собой («Собеседник 1/2/3»
+/// вместо общего «Собеседник»). Применяется к СЛЕДУЮЩЕЙ записи.
+#[tauri::command]
+pub fn set_diarize_guests(enabled: bool) {
+    info!("🗣️ Различение собеседников переключено: {}", enabled);
+    crate::audio::diarization::set_diarize_guests(enabled);
+}
+
+/// Текущее состояние различения собеседников + скачана ли модель.
+#[tauri::command]
+pub fn get_diarize_guests() -> serde_json::Value {
+    serde_json::json!({
+        "enabled": crate::audio::diarization::get_diarize_guests(),
+        "model_ready": crate::audio::diarization::is_model_downloaded(),
+    })
 }

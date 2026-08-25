@@ -13,6 +13,7 @@ pub mod permissions;
 // NEW: Device detection and diagnostics for adaptive buffering
 pub mod device_detection;
 pub mod diagnostics;
+pub mod diarization;  // Распознавание говорящих внутри канала собеседников
 pub mod ffmpeg_mixer;  // NEW: FFmpeg-style adaptive audio mixer
 
 // New simplified audio system

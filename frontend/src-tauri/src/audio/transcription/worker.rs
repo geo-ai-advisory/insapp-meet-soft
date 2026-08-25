@@ -151,8 +151,17 @@ pub fn start_transcription_task<R: Runtime>(
                             // (Собеседник). None - когда разделение спикеров выключено.
                             let chunk_speaker: Option<String> = if crate::audio::pipeline::get_separate_speakers() {
                                 Some(match chunk.device_type {
+                                    // Микрофон - это всегда владелец записи.
                                     RecordingDeviceType::Microphone => "mic".to_string(),
-                                    RecordingDeviceType::System => "system".to_string(),
+                                    // В системном звуке может быть несколько собеседников -
+                                    // различаем их по голосу. Не удалось определить (слишком
+                                    // короткая реплика / модель не готова) - общая подпись.
+                                    RecordingDeviceType::System => {
+                                        match crate::audio::diarization::identify_guest(&chunk.data, chunk.sample_rate) {
+                                            Some(n) => format!("system_{}", n),
+                                            None => "system".to_string(),
+                                        }
+                                    }
                                 })
                             } else {
                                 None

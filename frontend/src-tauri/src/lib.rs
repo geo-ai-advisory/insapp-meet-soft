@@ -622,6 +622,8 @@ pub fn run() {
             audio::recording_commands::get_meeting_folder_path,
             audio::recording_commands::set_separate_speakers,
             audio::recording_commands::get_separate_speakers,
+            audio::recording_commands::set_diarize_guests,
+            audio::recording_commands::get_diarize_guests,
             // Reload sync commands (retrieve transcript history and meeting name)
             audio::recording_commands::get_transcript_history,
             audio::recording_commands::get_recording_meeting_name,
