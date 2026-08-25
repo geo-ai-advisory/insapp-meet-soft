@@ -40,6 +40,9 @@ export interface VirtualizedTranscriptViewProps {
     isMeetingView?: boolean;
     /** Удалить эту (пустую) встречу - кнопка на экране встречи. */
     onDeleteMeeting?: () => void;
+    /** id встречи. Нужен, чтобы дать переименовать участников
+     *  («Собеседник 1» -> «Иван») и запомнить это для встречи. */
+    meetingId?: string;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -110,6 +113,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    onRenameSpeaker,
 }: {
     id: string;
     timestamp: number;
@@ -119,6 +123,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    /** Клик по имени участника - переименовать (доступно на экране встречи). */
+    onRenameSpeaker?: () => void;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
@@ -140,13 +146,29 @@ const TranscriptSegment = memo(function TranscriptSegment({
             {isStreaming ? (
                 <div className="bg-secondary border border-border rounded-lg px-3 py-2">
                     <p className="text-[15px] text-foreground leading-relaxed">
-                        {speaker && <span className={`font-semibold ${speakerColor || ''}`}>{speaker}:&nbsp;</span>}
+                        {speaker && (
+                            <span
+                                className={`font-semibold ${speakerColor || ''} ${onRenameSpeaker ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : ''}`}
+                                onClick={onRenameSpeaker}
+                                title={onRenameSpeaker ? 'Нажми, чтобы задать имя участника' : undefined}
+                            >
+                                {speaker}:&nbsp;
+                            </span>
+                        )}
                         {displayText}
                     </p>
                 </div>
             ) : (
                 <p className="text-[15px] text-foreground leading-relaxed">
-                    {speaker && <span className={`font-semibold ${speakerColor || ''}`}>{speaker}:&nbsp;</span>}
+                    {speaker && (
+                        <span
+                            className={`font-semibold ${speakerColor || ''} ${onRenameSpeaker ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : ''}`}
+                            onClick={onRenameSpeaker}
+                            title={onRenameSpeaker ? 'Нажми, чтобы задать имя участника' : undefined}
+                        >
+                            {speaker}:&nbsp;
+                        </span>
+                    )}
                     {displayText}
                 </p>
             )}
@@ -170,7 +192,40 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     onLoadMore,
     isMeetingView = false,
     onDeleteMeeting,
+    meetingId,
 }) => {
+    // Пользовательские имена участников: "system_1" -> "Иван".
+    // Грузим для встречи и подставляем вместо автоподписи «Собеседник 1».
+    const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
+    const [renamingKey, setRenamingKey] = useState<string | null>(null);
+    const [renameValue, setRenameValue] = useState('');
+
+    useEffect(() => {
+        if (!meetingId) return;
+        let alive = true;
+        import('@tauri-apps/api/core')
+            .then(({ invoke }) => invoke<Record<string, string>>('api_get_speaker_names', { meetingId }))
+            .then((names) => { if (alive && names) setSpeakerNames(names); })
+            .catch(() => { /* имён ещё нет - показываем автоподписи */ });
+        return () => { alive = false; };
+    }, [meetingId]);
+
+    const saveSpeakerName = useCallback(async (key: string, name: string) => {
+        setSpeakerNames((prev) => {
+            const next = { ...prev };
+            if (name.trim()) next[key] = name.trim(); else delete next[key];
+            return next;
+        });
+        setRenamingKey(null);
+        if (!meetingId) return;
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('api_set_speaker_name', { meetingId, speakerKey: key, displayName: name.trim() });
+        } catch (e) {
+            console.warn('[insapp-meet] не удалось сохранить имя участника', e);
+        }
+    }, [meetingId]);
+
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
@@ -291,11 +346,80 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     }, [segments]);
     const colorFor = (sp?: string) => (sp ? speakerColorByIndex(speakerColorIndex.get(sp) ?? 0) : '');
 
+    // Итоговая подпись: заданное пользователем имя, иначе автоматическая
+    // («Вы» / «Собеседник N»).
+    const labelFor = useCallback(
+        (sp?: string) => (sp && speakerNames[sp]) || speakerLabel(sp),
+        [speakerNames]
+    );
+    // Переименовывать даём на экране встречи (там встреча уже сохранена).
+    const renameHandlerFor = useCallback(
+        (sp?: string) => {
+            if (!sp || !meetingId) return undefined;
+            return () => { setRenamingKey(sp); setRenameValue(speakerNames[sp] || ''); };
+        },
+        [meetingId, speakerNames]
+    );
+
     // Use simple rendering for small lists, virtualization for large lists
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
 
     return (
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
+            {/* Окно «Имя участника»: клик по подписи спикера -> задать своё имя.
+                Имя применяется ко ВСЕМ репликам этого голоса и запоминается за встречей. */}
+            {renamingKey && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                    onClick={() => setRenamingKey(null)}
+                >
+                    <div
+                        className="bg-background border border-border rounded-xl shadow-xl p-5 w-[320px]"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p className="text-sm font-semibold text-foreground mb-1">Имя участника</p>
+                        <p className="text-xs text-muted-foreground mb-3">
+                            Заменит подпись «{speakerLabel(renamingKey)}» во всей расшифровке этой встречи.
+                        </p>
+                        <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveSpeakerName(renamingKey, renameValue);
+                                if (e.key === 'Escape') setRenamingKey(null);
+                            }}
+                            placeholder="Например: Иван Петров"
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-input bg-background text-foreground outline-none focus:ring-2 focus:ring-ring"
+                        />
+                        <div className="flex justify-between items-center mt-4">
+                            <button
+                                type="button"
+                                onClick={() => saveSpeakerName(renamingKey, '')}
+                                className="text-xs text-muted-foreground hover:text-foreground"
+                            >
+                                Сбросить
+                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setRenamingKey(null)}
+                                    className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-secondary"
+                                >
+                                    Отмена
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => saveSpeakerName(renamingKey, renameValue)}
+                                    className="px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:opacity-90"
+                                >
+                                    Сохранить
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Индикация записи (статус «Идёт запись» / таймер / уровень) теперь живёт в
                 НИЖНЕМ ДОКЕ (RecordingDockStatus) - дубль-бар в ленте убран, чтобы текст
                 расшифровки ничего не отвлекало (компоновка «нижний док», вариант B). */}
@@ -396,8 +520,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         id={segment.id}
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
-                                        speaker={speakerLabel((segment as any).speaker)}
+                                        speaker={labelFor((segment as any).speaker)}
                                         speakerColor={colorFor((segment as any).speaker)}
+                                        onRenameSpeaker={renameHandlerFor((segment as any).speaker)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
@@ -454,8 +579,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         id={segment.id}
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
-                                        speaker={speakerLabel((segment as any).speaker)}
+                                        speaker={labelFor((segment as any).speaker)}
                                         speakerColor={colorFor((segment as any).speaker)}
+                                        onRenameSpeaker={renameHandlerFor((segment as any).speaker)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}

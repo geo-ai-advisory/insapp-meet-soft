@@ -12,12 +12,24 @@ use crate::state::AppState;
 /// Строки вида "**[mm:ss]** текст" или "**[hh:mm:ss]** текст".
 fn parse_markdown_to_segments(markdown: &str) -> Vec<crate::api::TranscriptSegment> {
     let re = regex::Regex::new(r"^\*\*\[([0-9:]+)\]\*\*\s*(.+)$").unwrap();
+    // Имя участника в начале реплики: `**Иван:** текст` (новый формат с именами).
+    // Старый формат (без имени) продолжает читаться как раньше.
+    let re_speaker = regex::Regex::new(r"^\*\*([^*:]{1,60}):\*\*\s*(.*)$").unwrap();
     let mut segments = Vec::new();
     for line in markdown.lines() {
         let line = line.trim();
         if let Some(caps) = re.captures(line) {
             let ts = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            let text = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim().to_string();
+            let rest = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim().to_string();
+            // Отделяем имя участника от самого текста реплики.
+            let (speaker_name, text) = match re_speaker.captures(&rest) {
+                Some(sc) => (
+                    sc.get(1).map(|m| m.as_str().trim().to_string()),
+                    sc.get(2).map(|m| m.as_str()).unwrap_or("").trim().to_string(),
+                ),
+                None => (None, rest),
+            };
+            let _ = &speaker_name;
             if text.is_empty() {
                 continue;
             }
@@ -424,7 +436,16 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
         .fold(0.0_f64, f64::max);
     let duration_sec = if duration_sec > 0.0 { Some(duration_sec) } else { None };
 
-    let markdown = insapp_server::segments_to_markdown(&meeting.title, &segments);
+    // Имена участников, заданные пользователем - уходят на сервер вместе с текстом,
+    // чтобы в дашборде и в скачанном файле было «Иван:», а не «Собеседник 1:».
+    let names: std::collections::HashMap<String, String> =
+        crate::database::repositories::transcript::TranscriptsRepository::get_speaker_names(pool, &meeting_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+    let markdown = insapp_server::segments_to_markdown_with_names(&meeting.title, &segments, &names);
     let mut meta = insapp_server::TranscriptMeta::for_transcript(&meeting_id, &meeting.title, duration_sec);
     meta.meeting_type = meeting.meeting_type.clone();
 
@@ -525,7 +546,13 @@ pub async fn insapp_upload_all_meetings<R: Runtime>(
             .fold(0.0_f64, f64::max);
         let duration_sec = if duration_sec > 0.0 { Some(duration_sec) } else { None };
 
-        let markdown = insapp_server::segments_to_markdown(&full.title, &segments);
+        let names: std::collections::HashMap<String, String> =
+            crate::database::repositories::transcript::TranscriptsRepository::get_speaker_names(pool, &m.id)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+        let markdown = insapp_server::segments_to_markdown_with_names(&full.title, &segments, &names);
         let mut meta = insapp_server::TranscriptMeta::for_transcript(&m.id, &full.title, duration_sec);
         meta.meeting_type = full.meeting_type.clone();
 
@@ -595,6 +622,58 @@ pub async fn try_upload_meeting<R: Runtime>(
     .await;
     tracing::info!("[insapp_upload] result for {}: {:?}", meeting_id, result);
     result
+}
+
+/// «Поделиться встречей»: получить публичную ссылку на расшифровку.
+///
+/// Встреча должна быть на сервере - если её там ещё нет, сначала выгружаем.
+/// Возвращает адрес вида https://<сервер>/s/<токен>: он открывается у любого
+/// без пароля. Повторный вызов возвращает ту же ссылку, а не плодит новые.
+#[tauri::command]
+pub async fn insapp_share_meeting<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    let settings = insapp_server::load_settings(pool).await;
+    let api_key = insapp_server::get_api_key();
+    if api_key.is_empty() {
+        return Err("Сначала войди под своей учётной записью".to_string());
+    }
+
+    // Гарантируем, что встреча есть на сервере (иначе делиться нечем).
+    // Уважает галочку «только локально»: там команда сама вернёт disabled.
+    let upload = insapp_upload_meeting_by_id(app, state.clone(), meeting_id.clone()).await;
+    if let Ok(v) = &upload {
+        if v.get("status").and_then(|s| s.as_str()) == Some("disabled") {
+            return Err(
+                "Эта встреча сохранена только локально - чтобы поделиться, включи отправку в облако"
+                    .to_string(),
+            );
+        }
+    }
+
+    let base = settings.server_url.trim_end_matches('/').to_string();
+    let url = format!("{}/api/v1/meetings/{}/share", base, meeting_id);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("client: {}", e))?;
+
+    let resp = client
+        .post(&url)
+        .header("X-Insapp-Api-Key", &api_key)
+        .send()
+        .await
+        .map_err(|e| format!("Сервер недоступен: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Сервер вернул {}", resp.status()));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| format!("parse: {}", e))?;
+    tracing::info!("[share] ссылка для встречи {} получена", meeting_id);
+    Ok(json)
 }
 
 /// Принять от фронта замеры уровня звука за прошедшую запись и, если звук

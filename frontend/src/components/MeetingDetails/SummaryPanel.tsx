@@ -12,8 +12,9 @@ import { Button } from '@/components/ui/button';
 import {
   Save, Copy, Loader2, FolderOpen,
   Calendar, ChevronDown, CheckCircle2, CloudOff,
-  ListChecks,
+  ListChecks, Link2, Check,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { ReactNode, RefObject, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -138,6 +139,34 @@ export function SummaryPanel({
   );
   const isExternal = meetingType === 'external';
 
+  // «Поделиться»: берём у сервера публичную ссылку на встречу и кладём в буфер.
+  // Ссылку можно отправить кому угодно - она открывается без пароля.
+  const [sharing, setSharing] = useState(false);
+  const [shared, setShared] = useState(false);
+
+  const handleShareMeeting = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const res = await invoke<{ url?: string }>('insapp_share_meeting', { meetingId: meeting.id });
+      const url = res?.url;
+      if (!url) throw new Error('сервер не вернул ссылку');
+      await navigator.clipboard.writeText(url);
+      setShared(true);
+      setTimeout(() => setShared(false), 2500);
+      toast.success('Ссылка скопирована', {
+        description: 'Откроется у любого, кому её отправишь - пароль не нужен.',
+      });
+      console.log('[insapp-meet] meet: share link', url);
+    } catch (e: any) {
+      const msg = typeof e === 'string' ? e : (e?.message || 'не удалось получить ссылку');
+      toast.error('Не получилось поделиться', { description: msg });
+      console.warn('[insapp-meet] meet: share failed', e);
+    } finally {
+      setSharing(false);
+    }
+  };
+
   // Синхронизируем локальный тип, если встреча сменилась (другой meeting.id) и
   // backend вернул иной meeting_type.
   useEffect(() => {
@@ -245,6 +274,31 @@ export function SummaryPanel({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>Скопировать резюме</TooltipContent>
+                </Tooltip>
+                {/* Поделиться: ссылка на встречу, открывается у любого без пароля */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => {
+                        Analytics.trackButtonClick('share_meeting', 'meeting_details');
+                        handleShareMeeting();
+                      }}
+                      disabled={sharing}
+                      className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:opacity-60"
+                      aria-label="Поделиться встречей"
+                    >
+                      {sharing ? (
+                        <Loader2 className="w-[18px] h-[18px] stroke-[1.75] animate-spin" />
+                      ) : shared ? (
+                        <Check className="w-[18px] h-[18px] stroke-[1.75] text-green-600" />
+                      ) : (
+                        <Link2 className="w-[18px] h-[18px] stroke-[1.75]" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {shared ? 'Ссылка скопирована' : 'Поделиться - ссылка откроется без пароля'}
+                  </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
               <AiTerminalLauncher

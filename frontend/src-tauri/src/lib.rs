@@ -666,6 +666,8 @@ pub fn run() {
             api::api_get_meeting_transcripts,
             api::api_save_meeting_title,
             api::api_set_meeting_type,
+            api::api_set_speaker_name,
+            api::api_get_speaker_names,
             api::api_save_transcript,
             api::open_meeting_folder,
             api::test_backend_connection,
@@ -763,6 +765,7 @@ pub fn run() {
             insapp_server_commands::insapp_upload_meeting_by_id,
             insapp_server_commands::insapp_upload_all_meetings,
             insapp_server_commands::send_audio_diagnostic,
+            insapp_server_commands::insapp_share_meeting,
             insapp_server_commands::insapp_sync_from_server,
             // Mic watcher commands (авто-попап)
             mic_watcher_commands::mic_watcher_get_settings,

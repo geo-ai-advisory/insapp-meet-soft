@@ -987,6 +987,57 @@ pub async fn api_set_meeting_type<R: Runtime>(
     }
 }
 
+/// Переименовать участника встречи: «Собеседник 1» -> «Иван».
+/// Пустое имя возвращает автоматическую подпись.
+#[tauri::command]
+pub async fn api_set_speaker_name<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    speaker_key: String,
+    display_name: String,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    match crate::database::repositories::transcript::TranscriptsRepository::set_speaker_name(
+        pool, &meeting_id, &speaker_key, &display_name,
+    )
+    .await
+    {
+        Ok(()) => Ok(serde_json::json!({ "ok": true })),
+        Err(e) => {
+            log_error!("Failed to set speaker name: {}", e);
+            Err(format!("Не удалось сохранить имя участника: {}", e))
+        }
+    }
+}
+
+/// Пользовательские имена участников встречи: метка источника -> имя.
+#[tauri::command]
+pub async fn api_get_speaker_names<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    match crate::database::repositories::transcript::TranscriptsRepository::get_speaker_names(
+        pool, &meeting_id,
+    )
+    .await
+    {
+        Ok(rows) => {
+            let map: serde_json::Map<String, serde_json::Value> = rows
+                .into_iter()
+                .map(|(k, v)| (k, serde_json::Value::String(v)))
+                .collect();
+            Ok(serde_json::Value::Object(map))
+        }
+        Err(e) => {
+            log_error!("Failed to get speaker names: {}", e);
+            Err(format!("Не удалось прочитать имена участников: {}", e))
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
     app: AppHandle<R>,

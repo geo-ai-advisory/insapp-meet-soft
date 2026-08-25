@@ -97,7 +97,49 @@ impl TranscriptMeta {
 }
 
 /// Конвертирует список сегментов транскрипта в один markdown-файл.
+/// Человекочитаемая подпись участника по технической метке источника речи.
+/// `names` - пользовательские имена для этой встречи («system_1» -> «Иван»).
+pub fn speaker_display_name(
+    speaker_key: &str,
+    names: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    if speaker_key.is_empty() {
+        return None;
+    }
+    if let Some(custom) = names.get(speaker_key) {
+        if !custom.trim().is_empty() {
+            return Some(custom.trim().to_string());
+        }
+    }
+    if speaker_key == "mic" {
+        return Some("Вы".to_string());
+    }
+    if speaker_key == "system" {
+        return Some("Собеседник".to_string());
+    }
+    if let Some(n) = speaker_key.strip_prefix("system_") {
+        if n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty() {
+            return Some(format!("Собеседник {}", n));
+        }
+    }
+    Some(speaker_key.to_string())
+}
+
 pub fn segments_to_markdown(meeting_title: &str, segments: &[TranscriptSegment]) -> String {
+    segments_to_markdown_with_names(meeting_title, segments, &std::collections::HashMap::new())
+}
+
+/// Транскрипт в markdown для сервера, С ИМЕНАМИ УЧАСТНИКОВ.
+///
+/// Формат строки: `**[мм:сс]** **Имя:** текст`. Имя - жирным, чтобы читалось
+/// и в дашборде, и в скачанном .md, и при пересылке. Если участник неизвестен
+/// (старые встречи, распознавание выключено) - строка прежнего вида
+/// `**[мм:сс]** текст`, поэтому старые клиенты и парсеры не ломаются.
+pub fn segments_to_markdown_with_names(
+    meeting_title: &str,
+    segments: &[TranscriptSegment],
+    names: &std::collections::HashMap<String, String>,
+) -> String {
     let mut buf = String::new();
     buf.push_str(&format!("# {}\n\n", meeting_title));
     buf.push_str(&format!("_Источник: Insapp-meet_\n\n"));
@@ -107,7 +149,19 @@ pub fn segments_to_markdown(meeting_title: &str, segments: &[TranscriptSegment])
             .audio_start_time
             .map(format_timestamp)
             .unwrap_or_else(|| seg.timestamp.clone());
-        buf.push_str(&format!("**[{}]** {}\n\n", timestamp, seg.text.trim()));
+        let who = seg
+            .speaker
+            .as_deref()
+            .and_then(|k| speaker_display_name(k, names));
+        match who {
+            Some(name) => buf.push_str(&format!(
+                "**[{}]** **{}:** {}\n\n",
+                timestamp,
+                name,
+                seg.text.trim()
+            )),
+            None => buf.push_str(&format!("**[{}]** {}\n\n", timestamp, seg.text.trim())),
+        }
     }
 
     buf
@@ -686,7 +740,14 @@ pub async fn upload_or_enqueue(
         .fold(0.0_f64, f64::max);
     let duration_sec = if duration_sec > 0.0 { Some(duration_sec) } else { None };
 
-    let markdown = segments_to_markdown(meeting_title, segments);
+    // Имена участников (если пользователь их задавал) - уходят вместе с текстом.
+    let names: std::collections::HashMap<String, String> =
+        crate::database::repositories::transcript::TranscriptsRepository::get_speaker_names(pool, meeting_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+    let markdown = segments_to_markdown_with_names(meeting_title, segments, &names);
     let meta = TranscriptMeta::for_transcript(meeting_id, meeting_title, duration_sec);
 
     match upload_transcript(&settings.server_url, api_key, &markdown, &meta).await {

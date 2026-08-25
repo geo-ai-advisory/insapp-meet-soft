@@ -57,9 +57,40 @@ pub fn get_diarize_guests() -> bool {
     DIARIZE_GUESTS.load(Ordering::Relaxed)
 }
 
+/// Кто произнёс реплику.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpeakerRole {
+    /// Владелец записи - «Вы».
+    Owner,
+    /// Собеседник под номером (1-based) - «Собеседник N».
+    Guest(usize),
+    /// Не удалось определить (короткая реплика / модель не готова).
+    Unknown,
+}
+
 struct Diarizer {
     extractor: EmbeddingExtractor,
     manager: EmbeddingManager,
+    /// Кластер голоса владельца записи. Определяется по ПЕРВОЙ достаточно
+    /// длинной реплике с микрофона: кто первым заговорил в микрофон - тот и
+    /// владелец. Дальше его голос узнаётся даже в общем микрофоне (очная
+    /// встреча), а чужие голоса оттуда идут как собеседники.
+    owner_cluster: Option<usize>,
+    /// Кластер голоса -> номер собеседника (1,2,3...). Владелец в нумерацию
+    /// не попадает, поэтому номера у собеседников идут подряд без пропусков.
+    guest_numbers: std::collections::HashMap<usize, usize>,
+}
+
+impl Diarizer {
+    /// Присвоить/получить номер собеседника для кластера голоса.
+    fn guest_number(&mut self, cluster: usize) -> usize {
+        if let Some(n) = self.guest_numbers.get(&cluster) {
+            return *n;
+        }
+        let n = self.guest_numbers.len() + 1;
+        self.guest_numbers.insert(cluster, n);
+        n
+    }
 }
 
 static DIARIZER: Lazy<Mutex<Option<Diarizer>>> = Lazy::new(|| Mutex::new(None));
@@ -119,7 +150,12 @@ pub async fn init() -> Result<(), String> {
     let manager = EmbeddingManager::new(MAX_SPEAKERS);
 
     let mut guard = DIARIZER.lock().map_err(|_| "diarizer lock".to_string())?;
-    *guard = Some(Diarizer { extractor, manager });
+    *guard = Some(Diarizer {
+        extractor,
+        manager,
+        owner_cluster: None,
+        guest_numbers: std::collections::HashMap::new(),
+    });
     info!("[diarization] распознавание говорящих готово (до {} собеседников)", MAX_SPEAKERS);
     Ok(())
 }
@@ -130,6 +166,8 @@ pub fn reset() {
     if let Ok(mut guard) = DIARIZER.lock() {
         if let Some(d) = guard.as_mut() {
             d.manager = EmbeddingManager::new(MAX_SPEAKERS);
+            d.owner_cluster = None;
+            d.guest_numbers.clear();
             info!("[diarization] голоса прошлой встречи сброшены");
         }
     }
@@ -145,19 +183,28 @@ pub fn unload() {
     }
 }
 
-/// Определить номер говорящего для куска речи собеседников.
+/// Определить, кто говорит, по голосу. Работает для ОБОИХ каналов:
 ///
-/// `samples` - моно 16 кГц (как отдаёт VAD). Возвращает 1-based номер
-/// собеседника, либо None если определить не удалось (короткий кусок,
-/// модель не готова, различение выключено) - тогда подпись будет общая.
-pub fn identify_guest(samples: &[f32], sample_rate: u32) -> Option<usize> {
+/// - `from_mic = true` (микрофон). В онлайн-встрече там только владелец.
+///   В ОЧНОЙ встрече в общий микрофон попадают все, поэтому голос всё равно
+///   проверяем: совпал с владельцем - «Вы», не совпал - «Собеседник N».
+/// - `from_mic = false` (системный звук) - это всегда собеседники.
+///
+/// `samples` - моно 16 кГц (как отдаёт VAD). Unknown = определить не удалось
+/// (короткая реплика, модель ещё не готова, распознавание выключено).
+pub fn identify_speaker(samples: &[f32], sample_rate: u32, from_mic: bool) -> SpeakerRole {
+    // Распознавание выключено: канал микрофона - владелец, остальное - гость
+    // без номера (прежнее поведение «Вы / Собеседник»).
     if !get_diarize_guests() {
-        return None;
+        return if from_mic { SpeakerRole::Owner } else { SpeakerRole::Unknown };
     }
+
     // Слишком короткий кусок - отпечаток неустойчив, не гадаем.
     let duration = samples.len() as f32 / sample_rate.max(1) as f32;
     if duration < MIN_SEGMENT_SEC {
-        return None;
+        // На коротком куске с микрофона безопаснее считать, что это владелец:
+        // в онлайн-встрече это верно всегда, в очной - в большинстве случаев.
+        return if from_mic { SpeakerRole::Owner } else { SpeakerRole::Unknown };
     }
 
     // Модель ждёт 16-битный звук, у нас float - конвертируем с ограничением,
@@ -167,27 +214,54 @@ pub fn identify_guest(samples: &[f32], sample_rate: u32) -> Option<usize> {
         .map(|&x| (x.clamp(-1.0, 1.0) * 32767.0) as i16)
         .collect();
 
-    let mut guard = DIARIZER.lock().ok()?;
-    let d = guard.as_mut()?;
+    let fallback = if from_mic { SpeakerRole::Owner } else { SpeakerRole::Unknown };
+
+    let mut guard = match DIARIZER.lock() {
+        Ok(g) => g,
+        Err(_) => return fallback,
+    };
+    let d = match guard.as_mut() {
+        Some(d) => d,
+        // Модель ещё качается/не готова - не теряем реплику.
+        None => return fallback,
+    };
 
     let embedding: Vec<f32> = match d.extractor.compute(&pcm) {
         Ok(it) => it.collect(),
         Err(e) => {
             warn!("[diarization] не посчитать отпечаток голоса: {:?}", e);
-            return None;
+            return fallback;
         }
     };
     if embedding.is_empty() {
-        return None;
+        return fallback;
     }
 
     // Лимит исчерпан - относим к ближайшему известному голосу, новых не заводим.
-    let id = if d.manager.get_all_speakers().len() >= MAX_SPEAKERS {
-        d.manager.get_best_speaker_match(embedding).ok()?
+    let cluster = if d.manager.get_all_speakers().len() >= MAX_SPEAKERS {
+        match d.manager.get_best_speaker_match(embedding) {
+            Ok(c) => c,
+            Err(_) => return fallback,
+        }
     } else {
-        d.manager.search_speaker(embedding, SIMILARITY_THRESHOLD)?
+        match d.manager.search_speaker(embedding, SIMILARITY_THRESHOLD) {
+            Some(c) => c,
+            None => return fallback,
+        }
     };
 
-    // Библиотека нумерует с нуля - людям показываем с единицы.
-    Some(id + 1)
+    // Первый уверенно распознанный голос С МИКРОФОНА - это владелец записи.
+    if from_mic && d.owner_cluster.is_none() {
+        d.owner_cluster = Some(cluster);
+        info!("[diarization] голос владельца записи запомнен");
+        return SpeakerRole::Owner;
+    }
+
+    if d.owner_cluster == Some(cluster) {
+        // Владельца узнаём в любом канале (его голос может прийти и из
+        // системного звука, если он подключён к встрече со второго устройства).
+        SpeakerRole::Owner
+    } else {
+        SpeakerRole::Guest(d.guest_number(cluster))
+    }
 }

@@ -7,6 +7,51 @@ use uuid::Uuid;
 pub struct TranscriptsRepository;
 
 impl TranscriptsRepository {
+    /// Сохранить пользовательское имя участника встречи
+    /// («Собеседник 1» -> «Иван»). Пустое имя удаляет переименование.
+    pub async fn set_speaker_name(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        speaker_key: &str,
+        display_name: &str,
+    ) -> Result<(), SqlxError> {
+        if meeting_id.trim().is_empty() || speaker_key.trim().is_empty() {
+            return Err(SqlxError::Protocol("meeting_id и speaker_key обязательны".into()));
+        }
+        if display_name.trim().is_empty() {
+            sqlx::query("DELETE FROM speaker_names WHERE meeting_id = ? AND speaker_key = ?")
+                .bind(meeting_id)
+                .bind(speaker_key)
+                .execute(pool)
+                .await?;
+            return Ok(());
+        }
+        sqlx::query(
+            "INSERT INTO speaker_names (meeting_id, speaker_key, display_name) VALUES (?, ?, ?)
+             ON CONFLICT(meeting_id, speaker_key) DO UPDATE SET display_name = excluded.display_name",
+        )
+        .bind(meeting_id)
+        .bind(speaker_key)
+        .bind(display_name.trim())
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Все пользовательские имена участников встречи: метка источника -> имя.
+    pub async fn get_speaker_names(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Vec<(String, String)>, SqlxError> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT speaker_key, display_name FROM speaker_names WHERE meeting_id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows)
+    }
+
     /// Saves a new meeting and its associated transcript segments.
     /// This function uses a transaction to ensure that either both the meeting
     /// and all its transcripts are saved, or none of them are.

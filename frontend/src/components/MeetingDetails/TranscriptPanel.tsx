@@ -103,6 +103,7 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          meetingId={meetingId}
           isMeetingView={isMeetingView}
           onDeleteMeeting={onDeleteMeeting}
         />
