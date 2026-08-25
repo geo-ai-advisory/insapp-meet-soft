@@ -575,3 +575,20 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod diag_two_vad {
+    use super::*;
+
+    /// РЕГРЕССИЯ 0.4.0: конвейер создаёт ДВА VAD (микрофон + системный звук).
+    /// Если второй не создаётся - падает старт записи целиком.
+    #[test]
+    fn two_vad_sessions_can_coexist() {
+        let first = ContinuousVadProcessor::new(48000, 400);
+        assert!(first.is_ok(), "первый VAD не создался: {:?}", first.err());
+        let second = ContinuousVadProcessor::new(48000, 400);
+        assert!(second.is_ok(), "ВТОРОЙ VAD не создался: {:?}", second.err());
+        // держим оба живыми одновременно - как в конвейере
+        let (_a, _b) = (first.unwrap(), second.unwrap());
+    }
+}
