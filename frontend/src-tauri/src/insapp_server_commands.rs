@@ -661,9 +661,13 @@ pub async fn insapp_share_meeting<R: Runtime>(
         .build()
         .map_err(|e| format!("client: {}", e))?;
 
+    // Content-Type обязателен: без него сервер отвечает 400 на POST без тела
+    // (поймано тестом - кнопка «Поделиться» молча падала).
     let resp = client
         .post(&url)
         .header("X-Insapp-Api-Key", &api_key)
+        .header("Content-Type", "application/json")
+        .body("{}")
         .send()
         .await
         .map_err(|e| format!("Сервер недоступен: {}", e))?;
