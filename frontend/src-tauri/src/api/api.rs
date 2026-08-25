@@ -30,6 +30,13 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    /// Дата встречи. Нужна счётчикам на главной («За неделю») и колонке «Дата»
+    /// в списке - без неё они всегда показывали ноль и прочерк.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// Длительность записи в минутах - для счётчика «Расшифровано».
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -364,9 +371,17 @@ pub async fn api_get_meetings<R: Runtime>(
         Ok(meeting_models) => {
             log_info!("Successfully got {} meetings", meeting_models.len());
 
+            // Длительности одним запросом на все встречи - иначе счётчик
+            // «Расшифровано» на главной всегда показывал ноль.
+            let durations = MeetingsRepository::get_durations_minutes(pool)
+                .await
+                .unwrap_or_default();
+
             let result: Vec<Meeting> = meeting_models
                 .into_iter()
                 .map(|m| Meeting {
+                    duration: durations.get(&m.id).copied(),
+                    created_at: Some(m.created_at.0.to_rfc3339()),
                     id: m.id,
                     title: m.title,
                 })

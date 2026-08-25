@@ -33,6 +33,24 @@ impl MeetingsRepository {
         Ok(meetings)
     }
 
+    /// Длительность каждой встречи в МИНУТАХ (id -> минуты).
+    /// Считаем по последней реплике - отдельного поля длительности в базе нет,
+    /// а счётчику «Расшифровано» на главной эти цифры нужны.
+    pub async fn get_durations_minutes(
+        pool: &SqlitePool,
+    ) -> Result<std::collections::HashMap<String, f64>, SqlxError> {
+        let rows: Vec<(String, Option<f64>)> = sqlx::query_as(
+            "SELECT meeting_id, MAX(audio_end_time) FROM transcripts
+             WHERE audio_end_time IS NOT NULL GROUP BY meeting_id",
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, secs)| secs.map(|s| (id, (s / 60.0).round())))
+            .collect())
+    }
+
     pub async fn delete_meeting(pool: &SqlitePool, meeting_id: &str) -> Result<bool, SqlxError> {
         if meeting_id.trim().is_empty() {
             return Err(SqlxError::Protocol(
