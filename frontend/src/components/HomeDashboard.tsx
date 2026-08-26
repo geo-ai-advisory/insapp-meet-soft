@@ -4,6 +4,9 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { Sparkles, Check, Cloud, CloudOff } from 'lucide-react';
+import { toast } from 'sonner';
+import { BulkSummaryDialog } from '@/components/BulkSummaryDialog';
 
 /**
  * Главный экран-дашборд - перенос утверждённого макета «Insapp Pro» (вариант B):
@@ -89,6 +92,11 @@ export default function HomeDashboard() {
 
   // Имя пользователя для приветствия (тот же источник, что профиль в sidebar).
   const [firstName, setFirstName] = useState('');
+  // Массовое создание резюме: окно выбора встреч.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  // Какая встреча сейчас в работе по кнопке «Сделать» (в колонке «Резюме»).
+  const [busyId, setBusyId] = useState<string | null>(null);
+
   useEffect(() => {
     invoke<{ full_name?: string }>('insapp_get_identity')
       .then((id) => {
@@ -97,6 +105,71 @@ export default function HomeDashboard() {
       })
       .catch(() => {});
   }, []);
+
+  // Тихий досыл на сервер того, что есть локально, но отсутствует в облаке.
+  // Нужен для старых встреч: их резюме раньше никуда не уезжали, и по ссылке
+  // «Поделиться» показывалось «резюме ещё не сделано». Молча, без всплывашек -
+  // пользователю важен результат, а не отчёт о синхронизации.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      invoke<{ summaries_sent?: number; transcripts_sent?: number }>('insapp_sync_pending')
+        .then((r) => {
+          const n = (r?.summaries_sent || 0) + (r?.transcripts_sent || 0);
+          if (n > 0) window.dispatchEvent(new CustomEvent('meetings-refresh'));
+        })
+        .catch(() => {});
+    }, 2500);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Создать резюме для одной встречи прямо из списка.
+  //
+  const makeSummary = async (m: any) => {
+    if (busyId) return;
+    setBusyId(m.id);
+
+    try {
+      await invoke('ai_summary_run_batch', { meetingIds: [m.id] });
+    } catch (e: any) {
+      setBusyId(null);
+      toast.error('Не получилось запустить', {
+        description: typeof e === 'string' ? e : (e?.message || 'попробуй ещё раз'),
+      });
+      return;
+    }
+
+    // Ждём появления резюме, опрашивая список встреч.
+    //
+    // Команда только запускает работу и сразу возвращает управление - само
+    // резюме делается в фоне минуту-другую. Опрос надёжнее подписки на события:
+    // результат виден по фактическому состоянию встречи, а не по сообщению,
+    // которое может не дойти.
+    const started = Date.now();
+    const LIMIT_MS = 13 * 60 * 1000; // чуть больше таймаута обработки в 12 минут
+
+    const tick = async () => {
+      try {
+        const list = await invoke<any[]>('api_get_meetings');
+        const found = list.find((x) => x.id === m.id);
+        if (found?.has_summary) {
+          setBusyId(null);
+          toast.success('Резюме готово', { description: m.title });
+          window.dispatchEvent(new CustomEvent('meetings-refresh'));
+          return;
+        }
+      } catch { /* сеть/база моргнули - просто ждём дальше */ }
+
+      if (Date.now() - started > LIMIT_MS) {
+        setBusyId(null);
+        toast.error('Резюме не получилось', {
+          description: 'Обработка слишком долгая. Попробуй ещё раз.',
+        });
+        return;
+      }
+      setTimeout(tick, 4000);
+    };
+    setTimeout(tick, 4000);
+  };
 
   const allMeetings = useMemo(() => meetings || [], [meetings]);
   const recent = useMemo(() => allMeetings.slice(0, 8), [allMeetings]);
@@ -158,7 +231,17 @@ export default function HomeDashboard() {
                   : 'Начните с первой записи - встречи появятся здесь'}
               </p>
             </div>
-            <div className="flex gap-2.5">
+            <div className="flex items-end gap-2.5">
+              {/* Массовое создание AI-резюме: показывает встречи без резюме,
+                  все отмечены; лишние можно снять и скрыть из предложений. */}
+              <button
+                onClick={() => setBulkOpen(true)}
+                className="mr-2 inline-flex items-center gap-2 self-stretch rounded-xl border border-dashed border-border/80 bg-background/40 px-4 text-[12.5px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-secondary hover:text-foreground"
+                title="Создать AI-резюме для всех встреч, у которых его ещё нет"
+              >
+                <Sparkles className="h-[15px] w-[15px] text-primary" />
+                Резюме для всех
+              </button>
               <StatCard value={totalCount} label="Всего встреч" />
               <StatCard value={weekCount} label="За неделю" />
               <StatCard value={totalHours} label="Расшифровано" />
@@ -177,18 +260,22 @@ export default function HomeDashboard() {
                 <div className="flex items-center gap-3 border-b border-border bg-background/50 px-[18px] py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   <span className="w-[34px] flex-shrink-0" />
                   <span className="min-w-0 flex-1">Встреча</span>
-                  <span className="w-[96px] flex-shrink-0">Дата</span>
-                  <span className="w-[64px] flex-shrink-0">Длит.</span>
-                  <span className="w-[78px] flex-shrink-0 text-right">Статус</span>
+                  <span className="w-[88px] flex-shrink-0">Дата</span>
+                  <span className="w-[56px] flex-shrink-0">Длит.</span>
+                  <span className="w-[104px] flex-shrink-0">Транскрипт</span>
+                  <span className="w-[132px] flex-shrink-0">Резюме</span>
                 </div>
                 {/* Строки */}
                 {recent.map((m) => {
                   const dt = parseMeetingDate(m);
                   return (
-                    <button
+                    <div
                       key={m.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => openMeeting(m)}
-                      className="group flex w-full items-center gap-3 border-b border-border px-[18px] py-3 text-left transition-colors last:border-b-0 hover:bg-secondary"
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMeeting(m); } }}
+                      className="group flex w-full cursor-pointer items-center gap-3 border-b border-border px-[18px] py-3 text-left transition-colors last:border-b-0 hover:bg-secondary"
                     >
                       <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-accent text-accent-foreground">
                         <DocIcon />
@@ -211,14 +298,40 @@ export default function HomeDashboard() {
                           <span className="mt-0.5 block truncate text-[12.5px] text-muted-foreground">{(m as any).preview}</span>
                         )}
                       </span>
-                      <span className="w-[96px] flex-shrink-0 text-[13px] text-muted-foreground">{formatMeetingDate(dt)}</span>
-                      <span className="w-[64px] flex-shrink-0 text-[13px] tabular-nums text-muted-foreground">{formatDuration((m as any).duration)}</span>
-                      <span className="w-[78px] flex-shrink-0 text-right">
-                        <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11.5px] font-medium text-emerald-600">
-                          Готово
-                        </span>
+                      <span className="w-[88px] flex-shrink-0 text-[13px] text-muted-foreground">{formatMeetingDate(dt)}</span>
+                      <span className="w-[56px] flex-shrink-0 text-[13px] tabular-nums text-muted-foreground">{formatDuration((m as any).duration)}</span>
+
+                      {/* Транскрипт: есть ли расшифровка и доехала ли она на сервер */}
+                      <span className="w-[104px] flex-shrink-0">
+                        <StatusChip ok={!!(m as any).has_transcript} synced={!!(m as any).transcript_synced} okLabel="Есть" />
                       </span>
-                    </button>
+
+                      {/* Резюме: либо статус, либо кнопка «сделать прямо отсюда» */}
+                      <span className="w-[132px] flex-shrink-0">
+                        {(m as any).has_summary ? (
+                          <StatusChip ok synced={!!(m as any).summary_synced} okLabel="Есть" />
+                        ) : (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); makeSummary(m); }}
+                            disabled={busyId === m.id || !(m as any).has_transcript}
+                            title={!(m as any).has_transcript ? 'Сначала нужна расшифровка встречи' : 'Создать AI-резюме этой встречи'}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                          >
+                            {busyId === m.id ? (
+                              <>
+                                <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-primary border-t-transparent" />
+                                Делаю...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-3 w-3 text-primary" />
+                                Сделать
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </span>
+                    </div>
                   );
                 })}
               </div>
@@ -226,7 +339,43 @@ export default function HomeDashboard() {
           </section>
         </div>
       </div>
+
+      {/* Массовое создание резюме: выбор встреч, запуск и видимый ход работы.
+          Окно само показывает прогресс - закрывать его при запуске не нужно. */}
+      <BulkSummaryDialog open={bulkOpen} onClose={() => setBulkOpen(false)} />
     </div>
+  );
+}
+
+/**
+ * Индикатор статуса для колонок «Транскрипт» и «Резюме».
+ *
+ * Показывает две разные вещи одним чипом: есть ли документ вообще и уехал ли он
+ * на сервер. Облачко серое = документ пока только на этом компьютере, по ссылке
+ * «Поделиться» его не увидят.
+ */
+function StatusChip({ ok, synced, okLabel }: { ok: boolean; synced: boolean; okLabel: string }) {
+  if (!ok) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-[11.5px] font-medium text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+        Нет
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11.5px] font-medium text-emerald-600"
+      title={synced ? 'Есть и загружено на сервер' : 'Есть, но пока только на этом компьютере'}
+    >
+      <Check className="h-3 w-3" />
+      {okLabel}
+      {synced ? (
+        <Cloud className="h-3 w-3 text-emerald-600/80" />
+      ) : (
+        <CloudOff className="h-3 w-3 text-muted-foreground/60" />
+      )}
+    </span>
   );
 }
 

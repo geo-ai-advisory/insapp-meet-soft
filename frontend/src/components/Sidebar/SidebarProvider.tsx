@@ -95,6 +95,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
           meeting_type: meeting.meeting_type,
           duration: meeting.duration,
           preview: meeting.preview,
+          // статусы для колонок на главной: есть ли расшифровка/резюме и уехали ли они на сервер
+          has_transcript: meeting.has_transcript,
+          transcript_synced: meeting.transcript_synced,
+          has_summary: meeting.has_summary,
+          summary_synced: meeting.summary_synced,
         }));
         setMeetings(transformedMeetings as any);
         Analytics.trackBackendConnection(true);
@@ -109,6 +114,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     fetchMeetings();
   }, [serverAddress, fetchMeetings]);
+
+  // Общий сигнал «перечитай список встреч». Его шлёт главная после создания
+  // резюме и после досыла на сервер - иначе колонки статуса остаются старыми
+  // до перезапуска приложения.
+  useEffect(() => {
+    const onRefresh = () => { fetchMeetings(); };
+    window.addEventListener('meetings-refresh', onRefresh);
+    return () => window.removeEventListener('meetings-refresh', onRefresh);
+  }, [fetchMeetings]);
 
   useEffect(() => {
     const fetchSettings = async () => {

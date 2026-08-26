@@ -459,15 +459,259 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
         Err(_) => "pending",
     };
 
+    if matches!(result, Ok(insapp_server::SyncStatus::Sent)) {
+        let _ = crate::database::repositories::meeting::MeetingsRepository::mark_synced(pool, &meeting_id, "transcript").await;
+    }
+
     tracing::info!(
         "[insapp_resend] result for {}: {}",
         meeting_id, status_str
     );
 
+    // Резюме - вторая половина встречи, и она обязана уезжать вместе с
+    // расшифровкой. Раньше выгружался только транскрипт, поэтому у встреч
+    // с уже готовым резюме публичная страница показывала «резюме ещё нет».
+    let summary_status = sync_summary_to_server(pool, &meeting_id, &meeting.title, &settings, &api_key).await;
+
     Ok(serde_json::json!({
         "status": status_str,
+        "summary_status": summary_status,
         "meeting_id": meeting_id,
     }))
+}
+
+/// Досыл на сервер всего, что есть локально, но отсутствует в облаке.
+///
+/// Зачем: расшифровки уезжали сразу после записи, а резюме - никогда, поэтому
+/// у старых встреч публичная ссылка показывала «резюме ещё не сделано».
+/// Команда сверяется со списком на сервере (по названию: расшифровка идёт под
+/// названием встречи, резюме - под «Резюме: <название>») и отправляет недостающее.
+/// Заодно проставляет честные отметки «загружено» тем встречам, которые на
+/// сервере уже есть - без этого колонки статуса в списке врали бы.
+///
+/// Идемпотентна: повторный вызов ничего не дублирует.
+#[tauri::command]
+pub async fn insapp_sync_pending<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    use crate::database::repositories::meeting::MeetingsRepository;
+    use std::collections::HashSet;
+
+    let pool = state.db_manager.pool();
+    let settings = insapp_server::load_settings(pool).await;
+    let api_key = insapp_server::get_api_key();
+    if api_key.is_empty() || !settings.auto_upload {
+        return Ok(serde_json::json!({ "status": "off" }));
+    }
+
+    let base = settings.server_url.trim_end_matches('/').to_string();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("client: {}", e))?;
+
+    // Что уже лежит на сервере.
+    //
+    // ВАЖНО: сервер отдаёт список порциями (максимум 200 записей за раз),
+    // независимо от запрошенного limit. Если взять только первую порцию,
+    // старые встречи в неё не попадут и будут считаться «отсутствующими» -
+    // из-за этого часть резюме раньше не доезжала. Поэтому читаем постранично
+    // до конца.
+    let mut remote: HashSet<String> = HashSet::new();
+    let mut offset = 0usize;
+    loop {
+        let resp = client
+            .get(format!("{}/api/v1/transcripts?limit=200&offset={}", base, offset))
+            .header("X-Insapp-Api-Key", &api_key)
+            .send()
+            .await
+            .map_err(|e| format!("Сервер недоступен: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(format!("Сервер вернул {}", resp.status()));
+        }
+        let json: serde_json::Value = resp.json().await.map_err(|e| format!("parse: {}", e))?;
+        let batch: Vec<String> = json
+            .get("items")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|i| i.get("title").and_then(|t| t.as_str()))
+                    .map(|s| s.trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let got = batch.len();
+        remote.extend(batch);
+        if got < 200 || offset > 20_000 {
+            break; // дошли до конца списка (страховка от бесконечного цикла)
+        }
+        offset += 200;
+    }
+    tracing::info!("[sync-pending] на сервере {} записей", remote.len());
+
+    let owner = insapp_server::get_full_name();
+    let meetings = MeetingsRepository::get_meetings(pool, Some(owner.as_str()))
+        .await
+        .map_err(|e| format!("Не удалось прочитать встречи: {}", e))?;
+
+    let (mut sent_tr, mut sent_sum, mut marked, mut failed) = (0usize, 0usize, 0usize, 0usize);
+
+    for m in &meetings {
+        // Встречи «только локально» не трогаем - это осознанный выбор владельца.
+        if MeetingsRepository::get_cloud_opt_out(pool, &m.id).await.unwrap_or(false) {
+            continue;
+        }
+
+        let title = m.title.trim().to_string();
+        let summary_title = format!("Резюме: {}", title);
+
+        // --- расшифровка ---
+        if remote.contains(&title) {
+            if MeetingsRepository::mark_synced(pool, &m.id, "transcript").await.is_ok() {
+                marked += 1;
+            }
+        } else {
+            match insapp_upload_meeting_by_id(_app.clone(), state.clone(), m.id.clone()).await {
+                Ok(v) if v.get("status").and_then(|s| s.as_str()) == Some("sent") => sent_tr += 1,
+                Ok(_) => {}
+                Err(_) => failed += 1,
+            }
+            // Выгрузка встречи сама тянет за собой резюме - дальше не дублируем.
+            continue;
+        }
+
+        // --- резюме ---
+        if remote.contains(&summary_title) {
+            if MeetingsRepository::mark_synced(pool, &m.id, "summary").await.is_ok() {
+                marked += 1;
+            }
+            // Пометка «в облаке» и внутри самого резюме - её читает экран встречи.
+            mark_summary_sent_in_result(pool, &m.id).await;
+        } else {
+            match sync_summary_to_server(pool, &m.id, &title, &settings, &api_key).await {
+                "sent" => sent_sum += 1,
+                "failed" => failed += 1,
+                _ => {}
+            }
+        }
+    }
+
+    tracing::info!(
+        "[sync-pending] расшифровок {}, резюме {}, отмечено {}, ошибок {}",
+        sent_tr, sent_sum, marked, failed
+    );
+
+    Ok(serde_json::json!({
+        "status": "ok",
+        "transcripts_sent": sent_tr,
+        "summaries_sent": sent_sum,
+        "marked": marked,
+        "failed": failed,
+    }))
+}
+
+/// Проставить в сохранённом резюме пометку «отправлено на сервер».
+///
+/// Экран встречи показывает чип «Резюме в облаке» по полю sync_status ВНУТРИ
+/// JSON результата резюме - а пакетная генерация писала туда "pending" и после
+/// успешной отправки никто это не обновлял. Получался рассинхрон: на главной
+/// «Есть ✓», внутри встречи - «ещё не в облаке». Обновляем здесь, в единой
+/// точке, для всех путей отправки.
+pub(crate) async fn mark_summary_sent_in_result(pool: &sqlx::SqlitePool, meeting_id: &str) {
+    let row = sqlx::query_as::<_, (String,)>(
+        "SELECT result FROM summary_processes
+         WHERE meeting_id = ? AND status = 'completed' AND result IS NOT NULL AND result != ''
+         ORDER BY updated_at DESC LIMIT 1",
+    )
+    .bind(meeting_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    let Some((result_json,)) = row else { return };
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&result_json) else { return };
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("sync_status".to_string(), serde_json::json!("sent"));
+        obj.insert("synced_at".to_string(), serde_json::json!(chrono::Utc::now().to_rfc3339()));
+    } else {
+        return;
+    }
+    let _ = sqlx::query(
+        "UPDATE summary_processes SET result = ? WHERE meeting_id = ? AND status = 'completed'",
+    )
+    .bind(v.to_string())
+    .bind(meeting_id)
+    .execute(pool)
+    .await;
+}
+
+/// Отправить готовое резюме встречи на сервер.
+///
+/// Резюме хранится отдельно от расшифровки и на сервер уходит своей записью
+/// (kind = "summary"). Функция общая для всех точек входа: авто-отправка после
+/// записи, пакетная генерация, кнопка «Поделиться» и досыл старых встреч -
+/// чтобы нигде не осталось пути, где резюме есть локально, но не на сервере.
+///
+/// Возвращает: "sent" | "none" (резюме нет) | "off" (выгрузка выключена) | "failed".
+pub(crate) async fn sync_summary_to_server(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    title: &str,
+    settings: &insapp_server::InsappServerSettings,
+    api_key: &str,
+) -> &'static str {
+    if !settings.auto_upload || api_key.is_empty() {
+        return "off";
+    }
+
+    // Берём самое свежее готовое резюме встречи.
+    let row = sqlx::query_as::<_, (String,)>(
+        "SELECT result FROM summary_processes
+         WHERE meeting_id = ? AND status = 'completed' AND result IS NOT NULL AND result != ''
+         ORDER BY updated_at DESC LIMIT 1",
+    )
+    .bind(meeting_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    let Some((result_json,)) = row else {
+        return "none";
+    };
+
+    // В result лежит JSON, текст резюме - в поле markdown.
+    let markdown = serde_json::from_str::<serde_json::Value>(&result_json)
+        .ok()
+        .and_then(|v| v.get("markdown").and_then(|m| m.as_str()).map(|s| s.to_string()))
+        .unwrap_or(result_json);
+
+    if markdown.trim().is_empty() {
+        return "none";
+    }
+
+    let mut meta = insapp_server::TranscriptMeta::for_transcript(meeting_id, &format!("Резюме: {}", title), None);
+    meta.kind = "summary".to_string();
+
+    match insapp_server::upload_transcript(&settings.server_url, api_key, &markdown, &meta).await {
+        Ok(insapp_server::SyncStatus::Sent) => {
+            let _ = crate::database::repositories::meeting::MeetingsRepository::mark_synced(pool, meeting_id, "summary").await;
+            mark_summary_sent_in_result(pool, meeting_id).await;
+            tracing::info!("[sync-summary] резюме {} отправлено", meeting_id);
+            "sent"
+        }
+        Ok(other) => {
+            tracing::warn!("[sync-summary] резюме {} не ушло: {:?}", meeting_id, other);
+            "failed"
+        }
+        Err(e) => {
+            tracing::warn!("[sync-summary] резюме {} ошибка: {}", meeting_id, e);
+            "failed"
+        }
+    }
 }
 
 /// Отправить ВСЕ встречи с транскриптами на сервер. Используется при первом

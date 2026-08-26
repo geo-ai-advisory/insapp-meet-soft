@@ -19,6 +19,9 @@ pub struct MeetingModel {
     /// 0 = можно отправлять на сервер. Источник истины для всех путей загрузки.
     #[sqlx(default)]
     pub cloud_opt_out: i64,
+    /// 1 = «больше не предлагать резюме для этой встречи».
+    #[sqlx(default)]
+    pub summary_opt_out: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]

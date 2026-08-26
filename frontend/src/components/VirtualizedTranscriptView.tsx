@@ -10,6 +10,12 @@ import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
 
+/**
+ * Имена участников, заданные ВО ВРЕМЯ записи (встречи в базе ещё нет).
+ * Живут в сессии до сохранения встречи, потом переносятся в неё.
+ */
+export const LIVE_SPEAKER_NAMES_KEY = 'insapp_live_speaker_names';
+
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
     segments: TranscriptSegmentData[];
@@ -201,7 +207,18 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const [renameValue, setRenameValue] = useState('');
 
     useEffect(() => {
-        if (!meetingId) return;
+        // Идёт запись, встреча ещё не сохранена - имена живут в сессии.
+        // Так участника можно назвать прямо во время разговора, и все его
+        // реплики (уже сказанные и будущие) сразу идут под этим именем.
+        if (!meetingId) {
+            if (typeof window !== 'undefined') {
+                try {
+                    const raw = sessionStorage.getItem(LIVE_SPEAKER_NAMES_KEY);
+                    if (raw) setSpeakerNames(JSON.parse(raw));
+                } catch { /* повреждённое значение - просто автоподписи */ }
+            }
+            return;
+        }
         let alive = true;
         import('@tauri-apps/api/core')
             .then(({ invoke }) => invoke<Record<string, string>>('api_get_speaker_names', { meetingId }))
@@ -217,7 +234,21 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             return next;
         });
         setRenamingKey(null);
-        if (!meetingId) return;
+
+        // Запись идёт, встречи в базе ещё нет: запоминаем в сессии.
+        // При сохранении встречи эти имена перенесутся в неё (см. storageService).
+        if (!meetingId) {
+            if (typeof window !== 'undefined') {
+                try {
+                    const raw = sessionStorage.getItem(LIVE_SPEAKER_NAMES_KEY);
+                    const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+                    if (name.trim()) map[key] = name.trim(); else delete map[key];
+                    sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(map));
+                } catch { /* не сохранилось - имя всё равно видно на экране */ }
+            }
+            return;
+        }
+
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('api_set_speaker_name', { meetingId, speakerKey: key, displayName: name.trim() });
@@ -360,13 +391,13 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         (sp?: string) => (sp && speakerNames[sp]) || speakerLabel(sp),
         [speakerNames]
     );
-    // Переименовывать даём на экране встречи (там встреча уже сохранена).
+    // Переименовывать можно и в сохранённой встрече, и прямо во время записи.
     const renameHandlerFor = useCallback(
         (sp?: string) => {
-            if (!sp || !meetingId) return undefined;
+            if (!sp) return undefined;
             return () => { setRenamingKey(sp); setRenameValue(speakerNames[sp] || ''); };
         },
-        [meetingId, speakerNames]
+        [speakerNames]
     );
 
     // Use simple rendering for small lists, virtualization for large lists

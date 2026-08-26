@@ -37,6 +37,16 @@ pub struct Meeting {
     /// Длительность записи в минутах - для счётчика «Расшифровано».
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    /// Статусы для колонок в списке: есть ли расшифровка и резюме и доехали
+    /// ли они до сервера.
+    #[serde(default)]
+    pub has_transcript: bool,
+    #[serde(default)]
+    pub transcript_synced: bool,
+    #[serde(default)]
+    pub has_summary: bool,
+    #[serde(default)]
+    pub summary_synced: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -376,14 +386,27 @@ pub async fn api_get_meetings<R: Runtime>(
             let durations = MeetingsRepository::get_durations_minutes(pool)
                 .await
                 .unwrap_or_default();
+            // Статусы «есть расшифровка / есть резюме / загружено на сервер»
+            // одним запросом на все встречи - для колонок в списке.
+            let flags = MeetingsRepository::get_status_flags(pool)
+                .await
+                .unwrap_or_default();
 
             let result: Vec<Meeting> = meeting_models
                 .into_iter()
-                .map(|m| Meeting {
-                    duration: durations.get(&m.id).copied(),
-                    created_at: Some(m.created_at.0.to_rfc3339()),
-                    id: m.id,
-                    title: m.title,
+                .map(|m| {
+                    let (has_tr, tr_sync, has_sum, sum_sync) =
+                        flags.get(&m.id).copied().unwrap_or((false, false, false, false));
+                    Meeting {
+                        duration: durations.get(&m.id).copied(),
+                        created_at: Some(m.created_at.0.to_rfc3339()),
+                        has_transcript: has_tr,
+                        transcript_synced: tr_sync,
+                        has_summary: has_sum,
+                        summary_synced: sum_sync,
+                        id: m.id,
+                        title: m.title,
+                    }
                 })
                 .collect();
             Ok(result)
@@ -1000,6 +1023,58 @@ pub async fn api_set_meeting_type<R: Runtime>(
             Err(format!("Failed to update meeting type: {}", e))
         }
     }
+}
+
+/// Встречи, для которых ещё нет резюме (для кнопки массового создания).
+/// Не включает те, что пользователь пометил «больше не предлагать».
+#[tauri::command]
+pub async fn api_get_meetings_without_summary<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    let owner = crate::insapp_server::get_full_name();
+    let owner_ref = if owner.trim().is_empty() { None } else { Some(owner.as_str()) };
+
+    match MeetingsRepository::get_meetings_without_summary(pool, owner_ref).await {
+        Ok(rows) => {
+            let items: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|(id, title, created_at, minutes)| {
+                    serde_json::json!({
+                        "id": id,
+                        "title": title,
+                        "created_at": created_at,
+                        "duration": minutes,
+                    })
+                })
+                .collect();
+            log_info!("Встреч без резюме: {}", items.len());
+            Ok(serde_json::json!({ "items": items }))
+        }
+        Err(e) => {
+            log_error!("Failed to list meetings without summary: {}", e);
+            Err(format!("Не удалось получить список встреч: {}", e))
+        }
+    }
+}
+
+/// Пометить встречи «больше не предлагать резюме».
+#[tauri::command]
+pub async fn api_skip_summary_for_meetings<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_ids: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    let mut done = 0usize;
+    for id in &meeting_ids {
+        if MeetingsRepository::set_summary_opt_out(pool, id, true).await.is_ok() {
+            done += 1;
+        }
+    }
+    log_info!("Помечено «не предлагать резюме»: {}", done);
+    Ok(serde_json::json!({ "updated": done }))
 }
 
 /// Переименовать участника встречи: «Собеседник 1» -> «Иван».

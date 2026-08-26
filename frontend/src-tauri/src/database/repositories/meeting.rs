@@ -33,6 +33,99 @@ impl MeetingsRepository {
         Ok(meetings)
     }
 
+    /// Встречи, у которых ещё НЕТ резюме и которые пользователь не пометил
+    /// как «не предлагать». Для кнопки массового создания резюме.
+    /// Возвращает (id, название, дата, длительность в минутах).
+    pub async fn get_meetings_without_summary(
+        pool: &SqlitePool,
+        owner: Option<&str>,
+    ) -> Result<Vec<(String, String, String, f64)>, SqlxError> {
+        // Резюме живут в summary_processes (status='completed'), а не в transcripts.
+        let sql = "
+            SELECT m.id, m.title, m.created_at,
+                   -- CAST обязателен: если у встречи нет длительности, COALESCE
+                   -- отдаёт целое 0, и чтение в дробное падало - список приходил
+                   -- пустым, а кнопка «Резюме для всех» говорила «все с резюме».
+                   CAST(COALESCE((SELECT MAX(t.audio_end_time) FROM transcripts t
+                             WHERE t.meeting_id = m.id), 0) AS REAL) AS dur
+            FROM meetings m
+            WHERE COALESCE(m.summary_opt_out, 0) = 0
+              AND NOT EXISTS (
+                    SELECT 1 FROM summary_processes s
+                    WHERE s.meeting_id = m.id AND s.status = 'completed'
+              )
+              AND EXISTS (SELECT 1 FROM transcripts t WHERE t.meeting_id = m.id)
+              AND (? IS NULL OR m.owner_login = ?)
+            ORDER BY m.created_at DESC";
+        // Параметр в запросе встречается дважды - биндим оба раза явно.
+        // С нумерованным ?1 sqlx ждал два значения и запрос не выполнялся,
+        // из-за чего список встреч всегда приходил пустым.
+        let rows: Vec<(String, String, String, f64)> = sqlx::query_as(sql)
+            .bind(owner)
+            .bind(owner)
+            .fetch_all(pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, title, created, secs)| (id, title, created, (secs / 60.0).round()))
+            .collect())
+    }
+
+    /// Отметить, что расшифровка (или резюме) встречи успешно ушли на сервер.
+    /// По этим отметкам список встреч показывает облачко «загружено».
+    pub async fn mark_synced(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        kind: &str, // "transcript" | "summary"
+    ) -> Result<(), SqlxError> {
+        let now = Utc::now().to_rfc3339();
+        let sql = if kind == "summary" {
+            "UPDATE meetings SET summary_synced_at = ? WHERE id = ?"
+        } else {
+            "UPDATE meetings SET transcript_synced_at = ? WHERE id = ?"
+        };
+        sqlx::query(sql).bind(&now).bind(meeting_id).execute(pool).await?;
+        Ok(())
+    }
+
+    /// Статусы для списка встреч: есть ли расшифровка/резюме и ушли ли на сервер.
+    /// Возвращает id -> (есть транскрипт, транскрипт на сервере, есть резюме, резюме на сервере).
+    pub async fn get_status_flags(
+        pool: &SqlitePool,
+    ) -> Result<std::collections::HashMap<String, (bool, bool, bool, bool)>, SqlxError> {
+        let rows: Vec<(String, i64, Option<String>, i64, Option<String>)> = sqlx::query_as(
+            "SELECT m.id,
+                    EXISTS(SELECT 1 FROM transcripts t WHERE t.meeting_id = m.id) AS has_tr,
+                    m.transcript_synced_at,
+                    EXISTS(SELECT 1 FROM summary_processes s
+                           WHERE s.meeting_id = m.id AND s.status = 'completed') AS has_sum,
+                    m.summary_synced_at
+             FROM meetings m",
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, has_tr, tr_sync, has_sum, sum_sync)| {
+                (id, (has_tr != 0, tr_sync.is_some(), has_sum != 0, sum_sync.is_some()))
+            })
+            .collect())
+    }
+
+    /// Пометить встречу «больше не предлагать резюме» (или снять пометку).
+    pub async fn set_summary_opt_out(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        opt_out: bool,
+    ) -> Result<(), SqlxError> {
+        sqlx::query("UPDATE meetings SET summary_opt_out = ? WHERE id = ?")
+            .bind(if opt_out { 1_i64 } else { 0_i64 })
+            .bind(meeting_id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
     /// Длительность каждой встречи в МИНУТАХ (id -> минуты).
     /// Считаем по последней реплике - отдельного поля длительности в базе нет,
     /// а счётчику «Расшифровано» на главной эти цифры нужны.

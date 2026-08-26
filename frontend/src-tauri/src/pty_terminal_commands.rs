@@ -105,29 +105,54 @@ impl Default for AiSummarySettings {
 //    e. Backend читает файл и возвращает markdown
 //    f. Frontend вызывает ai_summary_save_result → БД + сервер + event
 // 5. Файл - единственный источник истины. Никакой парсинг буфера не используется.
-const DEFAULT_PROMPT: &str = "Сделай структурированное деловое резюме встречи на русском языке.\n\
+const DEFAULT_PROMPT: &str = "Ты пишешь ПРОТОКОЛ деловой встречи на русском - такой, по которому можно работать, \
+а не пересказ. Читатель не был на встрече и должен за минуту понять: кто был, о чём договорились, что кому делать.\n\
 \n\
 Транскрипт встречи лежит в файле: {file}\n\
-Прочитай его (можешь использовать tool Read) и выведи в чат markdown-резюме со структурой:\n\
+Прочитай его целиком (tool Read) и выведи в чат markdown-протокол.\n\
 \n\
-## Цель встречи\n\
-(одно-два предложения)\n\
+СТРУКТУРА (блоки выбирай ПО СОДЕРЖАНИЮ встречи - лишние не выдумывай, нужные добавляй):\n\
 \n\
-## Ключевые темы\n\
-- ...\n\
-- ...\n\
+1) ШАПКА - три строки без заголовка:\n\
+🗓 <О чём встреча - конкретно, не «Обсуждение вопросов»>\n\
+<дата, длительность> · <Имя (компания)> · <Имена участников другой стороны (компания)>\n\
+<одна строка: что именно смотрели/делали на встрече>\n\
 \n\
-## Принятые решения\n\
-- ...\n\
+2) 🎯 Итог - СРАЗУ вторым блоком, 3-5 пунктов: главные решения и что это значит. \
+Не процесс, а результат.\n\
 \n\
-## Action items\n\
-1. <что сделать> - <кто> - <срок если ясно>\n\
-2. ...\n\
+3) ДАЛЕЕ - смысловые блоки по темам встречи, каждый со своим эмодзи и говорящим заголовком. \
+Примеры блоков (бери подходящие, придумывай свои по теме): \
+✏️ Правки/задачи по продукту (нумерованный список с подпунктами и деталями), \
+🪪 / 💳 Уточнить у <сторона> (открытые вопросы к смежникам, в конце строка «→ Флоу: <что из этого следует>»), \
+📦 Пострелиз / бэклог (что осознанно вынесли за рамки), \
+🔁 Риски и спорные места (позиция сторон + о чём договорились), \
+🛟 Поддержка, ⏱ Сроки и SLA.\n\
+\n\
+4) ⏸ Запарковано - нумерованный список того, что отложили, и почему/чего ждём.\n\
+\n\
+5) ✅ Действия - РАЗБИТО ПО СТОРОНАМ (по компаниям/командам), с именами исполнителей:\n\
+<Сторона 1>:\n\
+• <кто>: <что сделать> <срок если назван>\n\
+<Сторона 2>:\n\
+• ...\n\
+\n\
+6) 📅 Сроки - ключевые даты, если звучали.\n\
+\n\
+ПРАВИЛА:\n\
+- Конкретика вместо общих слов: имена, цифры, названия систем, сроки. \
+Если в транскрипте есть подписи участников («Вы», «Собеседник 1», имена) - используй их, чтобы понять, кто что предложил.\n\
+- Каждый пункт - самостоятельная мысль, по которой можно действовать. Не пиши «обсудили X» - пиши, ЧТО решили по X.\n\
+- Стрелка → для следствий и выводов.\n\
+- Живой деловой язык, без канцелярита и воды. Не пересказывай реплики подряд.\n\
+- Транскрипт распознан автоматически: имена и термины могут быть искажены - восстанавливай по смыслу \
+(например «пишка/фишка» → «API»), но НЕ выдумывай фактов, которых не было.\n\
+- Если чего-то в встрече не было (например SLA) - просто не включай такой блок.\n\
 \n\
 ВАЖНО: не добавляй заголовок типа \"# Резюме: ...\" в начало - название встречи уже отображается в карточке. \
-Начни сразу с \"## Цель встречи\".\n\
+Начни сразу с шапки 🗓.\n\
 \n\
-Пиши кратко, по-деловому, по-русски. Никаких маркеров - просто markdown в чат.\n\
+Пиши по-русски, по-деловому, плотно - без вводных фраз и воды. Просто markdown в чат.\n\
 \n\
 После вывода я могу попросить правки (\"сократи\", \"добавь раздел Х\", \"перепиши action items\"). \
 Выведи новую версию когда попрошу. Когда я нажму \"Сохранить как резюме\" - ты получишь команду записать \
@@ -735,4 +760,513 @@ pub async fn ai_summary_read_file<R: Runtime>(
         }
         Err(_) => Ok(None),
     }
+}
+
+// ============================================================
+// МАССОВОЕ СОЗДАНИЕ РЕЗЮМЕ
+// ============================================================
+//
+// Кнопка «Резюме для всех» на главной. В отличие от одиночного режима
+// (интерактивный терминал), здесь CLI запускается НЕИНТЕРАКТИВНО и отдаёт
+// готовый markdown в stdout - иначе на каждую встречу открывался бы терминал.
+//
+// Поддерживаются оба инструмента, как настроено у пользователя:
+//   claude -> claude --print <промпт>
+//   codex  -> codex exec <промпт>
+// Встречи обрабатываются ПО ОЧЕРЕДИ: параллельный запуск упёрся бы в лимиты
+// подписки и грел бы машину.
+
+/// Идёт ли сейчас массовое создание резюме + флаг остановки.
+/// Нужны, чтобы окно показывало реальный ход работы и умело прерывать очередь.
+static BATCH_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static BATCH_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Состояние пакетной генерации резюме - живёт в бэкенде, а не в окне.
+///
+/// Зачем: окно с прогрессом можно свернуть и открыть снова, при этом React-компонент
+/// пересоздаётся и всё, что он помнил, теряется - полоса откатывалась на 0%, список
+/// встреч показывался как «ещё не начатые», плавный рост начинался заново. Здесь
+/// хранится правда о ходе работы, и окно при открытии просто её забирает.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct BatchState {
+    pub done: usize,
+    pub total: usize,
+    pub failed: usize,
+    /// Какая встреча обрабатывается прямо сейчас.
+    pub current_id: Option<String>,
+    pub current_title: Option<String>,
+    /// Когда взялись за текущую встречу (unix-время, мс) - от него окно
+    /// считает «идёт N секунд» и плавный рост полосы.
+    pub current_started_ms: Option<u64>,
+    /// Состояние каждой встречи очереди: id -> "wait" | "running" | "done" | "error".
+    pub items: Vec<BatchItem>,
+    pub cancelled: bool,
+    pub finished: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchItem {
+    pub id: String,
+    pub title: String,
+    pub state: String,
+    pub error: Option<String>,
+}
+
+static BATCH_STATE: std::sync::Mutex<Option<BatchState>> = std::sync::Mutex::new(None);
+
+/// Процесс, который прямо сейчас делает резюме.
+///
+/// Нужен, чтобы «Остановить» срабатывало сразу. Раньше отмена лишь поднимала
+/// флаг, а цикл смотрел на него только ПЕРЕД следующей встречей - на часовой
+/// записи это означало ждать несколько минут, и кнопка выглядела мёртвой.
+static CURRENT_CHILD_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn batch_state_set(f: impl FnOnce(&mut BatchState)) {
+    if let Ok(mut guard) = BATCH_STATE.lock() {
+        if let Some(st) = guard.as_mut() {
+            f(st);
+        }
+    }
+}
+
+/// Текущий ход пакетной генерации - окно запрашивает при открытии,
+/// чтобы показать реальное состояние, а не начинать с нуля.
+#[tauri::command]
+pub fn ai_summary_batch_status() -> Option<BatchState> {
+    BATCH_STATE.lock().ok().and_then(|g| g.clone())
+}
+
+
+/// Остановить массовое создание резюме. Текущая встреча дорабатывается,
+/// следующие не запускаются.
+#[tauri::command]
+pub fn ai_summary_cancel_batch() {
+    BATCH_CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    // Снимаем процесс, который обрабатывает встречу прямо сейчас - иначе
+    // остановка ждала бы окончания текущей встречи (это минуты).
+    let pid = CURRENT_CHILD_PID.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if pid > 0 {
+        #[cfg(unix)]
+        { let _ = std::process::Command::new("kill").args(["-TERM", &pid.to_string()]).output(); }
+        #[cfg(windows)]
+        { let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output(); }
+        log::info!("[bulk-summary] остановка: снял процесс {}", pid);
+    }
+    log::info!("[bulk-summary] запрошена остановка");
+}
+
+/// Идёт ли сейчас массовая обработка (чтобы окно не запускало вторую).
+#[tauri::command]
+pub fn ai_summary_batch_running() -> bool {
+    BATCH_RUNNING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchProgress {
+    pub done: usize,
+    pub total: usize,
+    pub meeting_id: String,
+    pub title: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+/// Собрать транскрипт встречи в markdown-файл и вернуть путь + название.
+async fn prepare_transcript_file<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<(PathBuf, String), String> {
+    let rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
+        "SELECT transcript, timestamp, audio_start_time, audio_end_time
+         FROM transcripts WHERE meeting_id = ? ORDER BY audio_start_time ASC NULLS LAST, timestamp ASC",
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Не прочитать транскрипт: {}", e))?;
+
+    if rows.is_empty() {
+        return Err("Транскрипт пуст".to_string());
+    }
+
+    let title: String = sqlx::query_as::<_, (String,)>("SELECT title FROM meetings WHERE id = ?")
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(t,)| t)
+        .unwrap_or_else(|| "Встреча".to_string());
+
+    // Имена участников, если пользователь их задавал - чтобы резюме писало
+    // «Иван», а не «Собеседник 1».
+    let names: std::collections::HashMap<String, String> =
+        crate::database::repositories::transcript::TranscriptsRepository::get_speaker_names(pool, meeting_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+    let speakers: Vec<(String, Option<String>)> = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT transcript, speaker FROM transcripts WHERE meeting_id = ?
+         ORDER BY audio_start_time ASC NULLS LAST, timestamp ASC",
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut buf = format!("# {}\n\n", title);
+    for (i, (text, ts, start, _end)) in rows.iter().enumerate() {
+        let stamp = start
+            .map(|s| {
+                let t = s as u64;
+                format!("{:02}:{:02}", t / 60, t % 60)
+            })
+            .unwrap_or_else(|| ts.clone());
+        let who = speakers
+            .get(i)
+            .and_then(|(_, sp)| sp.as_deref())
+            .and_then(|k| crate::insapp_server::speaker_display_name(k, &names));
+        match who {
+            Some(name) => buf.push_str(&format!("**[{}]** **{}:** {}\n\n", stamp, name, text.trim())),
+            None => buf.push_str(&format!("**[{}]** {}\n\n", stamp, text.trim())),
+        }
+    }
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {}", e))?;
+    let temp_dir = app_data.join("ai-summary-temp");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("mkdir: {}", e))?;
+    let file = temp_dir.join(format!("{}-batch.md", meeting_id));
+    std::fs::write(&file, buf).map_err(|e| format!("write: {}", e))?;
+    Ok((file, title))
+}
+
+/// Запустить CLI неинтерактивно и получить markdown резюме из stdout.
+async fn run_cli_once(
+    settings: &AiSummarySettings,
+    transcript_path: &PathBuf,
+    title: &str,
+) -> Result<String, String> {
+    let prompt = settings
+        .prompt_template
+        .replace("{title}", title)
+        .replace("{file}", &transcript_path.to_string_lossy())
+        .replace("{output}", "");
+    let dir = transcript_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let (cmd, args): (String, Vec<String>) = match settings.provider.as_str() {
+        // claude: --print отдаёт ответ в stdout вместо интерактивного чата.
+        //
+        // --setting-sources=project,local ОБЯЗАТЕЛЕН: личные настройки
+        // пользователя (~/.claude/settings.json) могут содержать правила,
+        // которые новые версии CLI считают некорректными - тогда claude падает
+        // ещё до работы, и резюме не создаётся ни для одной встречи.
+        // Подписки это не касается: авторизация хранится отдельно от настроек.
+        "claude" => (
+            settings.command.clone(),
+            vec![
+                "--print".to_string(),
+                "--setting-sources".to_string(),
+                "project,local".to_string(),
+                "--permission-mode".to_string(),
+                "bypassPermissions".to_string(),
+                "--add-dir".to_string(),
+                dir,
+                "--allowedTools".to_string(),
+                "Read".to_string(),
+            ],
+        ),
+        // codex: exec - неинтерактивный режим
+        "codex" => (settings.command.clone(), vec!["exec".to_string()]),
+        _ => (settings.command.clone(), settings.args.clone()),
+    };
+
+    // Промпт передаём ЧЕРЕЗ ВХОДНОЙ ПОТОК, а не аргументом: он многострочный,
+    // и как аргумент обрезался - CLI отвечал «нет входных данных».
+    use tokio::io::AsyncWriteExt;
+    let mut child = tokio::process::Command::new(&cmd)
+        .args(&args)
+        .env("PATH", crate::pty_terminal::enriched_path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("не запустить {}: {}", cmd, e))?;
+
+    // Запоминаем процесс - чтобы кнопка «Остановить» могла снять его сразу.
+    if let Some(pid) = child.id() {
+        CURRENT_CHILD_PID.store(pid, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(prompt.as_bytes()).await;
+        let _ = stdin.shutdown().await; // закрываем поток - иначе CLI ждёт продолжения
+    }
+
+    // Ограничение по времени на ОДНУ встречу.
+    //
+    // Без него зависший процесс держит всю очередь бесконечно: пользователь
+    // видит крутилку и не понимает, идёт работа или всё умерло. 12 минут - с
+    // большим запасом даже для длинной встречи (обычная укладывается в 1-3).
+    // По истечении срока процесс снимаем и отдаём внятную ошибку - встречу
+    // можно повторить кнопкой «Повторить».
+    let out = match tokio::time::timeout(
+        std::time::Duration::from_secs(12 * 60),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(res) => {
+            CURRENT_CHILD_PID.store(0, std::sync::atomic::Ordering::Relaxed);
+            res.map_err(|e| format!("ошибка выполнения {}: {}", cmd, e))?
+        }
+        Err(_) => {
+            CURRENT_CHILD_PID.store(0, std::sync::atomic::Ordering::Relaxed);
+            return Err("обработка заняла больше 12 минут и была остановлена".to_string());
+        }
+    };
+
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("{} вернул ошибку: {}", cmd, err.chars().take(200).collect::<String>()));
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if text.is_empty() {
+        return Err("пустой ответ модели".to_string());
+    }
+    Ok(text)
+}
+
+/// Создать резюме для списка встреч по очереди.
+/// Прогресс шлётся событием "bulk-summary-progress", финал - "bulk-summary-done".
+#[tauri::command]
+pub async fn ai_summary_run_batch<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    meeting_ids: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    if meeting_ids.is_empty() {
+        return Err("Не выбрано ни одной встречи".to_string());
+    }
+    let pool = state.db_manager.pool().clone();
+    let settings = load_ai_settings(&pool).await;
+
+    // Проверяем, что инструмент вообще установлен - иначе бессмысленно
+    // гонять цикл и сыпать одинаковыми ошибками.
+    if which::which_in(&settings.command, Some(crate::pty_terminal::enriched_path()), std::env::current_dir().ok().unwrap_or_default()).is_err()
+        && !std::path::Path::new(&settings.command).exists()
+    {
+        return Err(format!(
+            "Не найден инструмент «{}». Проверь настройки AI-резюме.",
+            settings.command
+        ));
+    }
+
+    let total = meeting_ids.len();
+    let app_bg = app.clone();
+    BATCH_CANCEL.store(false, std::sync::atomic::Ordering::Relaxed);
+    BATCH_RUNNING.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    // Готовим состояние очереди заранее - чтобы окно, открытое посреди работы,
+    // сразу показало полный список встреч, а не пустоту.
+    {
+        let mut items = Vec::with_capacity(meeting_ids.len());
+        for id in &meeting_ids {
+            let title: String = sqlx::query_as::<_, (String,)>("SELECT title FROM meetings WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+                .map(|(t,)| t)
+                .unwrap_or_default();
+            items.push(BatchItem { id: id.clone(), title, state: "wait".to_string(), error: None });
+        }
+        if let Ok(mut g) = BATCH_STATE.lock() {
+            *g = Some(BatchState { total, items, ..Default::default() });
+        }
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let mut done = 0usize;
+        let mut failed = 0usize;
+        for id in meeting_ids {
+            if BATCH_CANCEL.load(std::sync::atomic::Ordering::Relaxed) {
+                log::info!("[bulk-summary] остановлено пользователем на {} из {}", done, total);
+                break;
+            }
+            // Сообщаем, за какую встречу взялись - окно показывает её как «идёт».
+            let started_title: String =
+                sqlx::query_as::<_, (String,)>("SELECT title FROM meetings WHERE id = ?")
+                    .bind(&id)
+                    .fetch_optional(&pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|(t,)| t)
+                    .unwrap_or_default();
+            // Фиксируем в состоянии, за какую встречу взялись и когда - от этого
+            // окно считает «идёт N секунд» и плавный рост полосы даже после
+            // сворачивания и повторного открытия.
+            {
+                let id_c = id.clone();
+                let title_c = started_title.clone();
+                batch_state_set(move |st| {
+                    st.current_id = Some(id_c.clone());
+                    st.current_title = Some(title_c);
+                    st.current_started_ms = Some(now_ms());
+                    if let Some(item) = st.items.iter_mut().find(|i| i.id == id_c) {
+                        item.state = "running".to_string();
+                    }
+                });
+            }
+
+            let _ = app_bg.emit(
+                "bulk-summary-started",
+                serde_json::json!({ "meeting_id": id, "title": started_title, "done": done, "total": total }),
+            );
+
+            let (ok, title, error) = match prepare_transcript_file(&app_bg, &pool, &id).await {
+                Ok((file, title)) => match run_cli_once(&settings, &file, &title).await {
+                    Ok(markdown) => {
+                        let saved = save_summary_markdown(&app_bg, &pool, &id, &markdown).await;
+                        let _ = std::fs::remove_file(&file);
+                        match saved {
+                            Ok(()) => (true, title, None),
+                            Err(e) => (false, title, Some(e)),
+                        }
+                    }
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&file);
+                        (false, title, Some(e))
+                    }
+                },
+                Err(e) => (false, String::new(), Some(e)),
+            };
+
+            done += 1;
+            if !ok {
+                failed += 1;
+                log::warn!("[bulk-summary] {} - ошибка: {:?}", id, error);
+            }
+            {
+                let id_c = id.clone();
+                let err_c = error.clone();
+                batch_state_set(move |st| {
+                    st.done = done;
+                    st.failed = failed;
+                    st.current_id = None;
+                    st.current_title = None;
+                    st.current_started_ms = None;
+                    if let Some(item) = st.items.iter_mut().find(|i| i.id == id_c) {
+                        item.state = if ok { "done".to_string() } else { "error".to_string() };
+                        item.error = err_c;
+                    }
+                });
+            }
+
+            let _ = app_bg.emit(
+                "bulk-summary-progress",
+                BatchProgress { done, total, meeting_id: id.clone(), title, ok, error },
+            );
+        }
+        BATCH_RUNNING.store(false, std::sync::atomic::Ordering::Relaxed);
+        let cancelled = BATCH_CANCEL.load(std::sync::atomic::Ordering::Relaxed);
+        batch_state_set(move |st| {
+            st.finished = true;
+            st.cancelled = cancelled;
+            st.current_id = None;
+            st.current_title = None;
+            st.current_started_ms = None;
+        });
+        let _ = app_bg.emit(
+            "bulk-summary-done",
+            serde_json::json!({ "total": total, "done": done, "failed": failed, "cancelled": cancelled }),
+        );
+        log::info!("[bulk-summary] готово: {} из {}", total - failed, total);
+    });
+
+    Ok(serde_json::json!({ "started": total }))
+}
+
+/// Записать готовое резюме встречи в базу (пакетный режим).
+/// Тот же формат, что и при ручном сохранении: summary_processes + result-json.
+async fn save_summary_markdown<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    pool: &SqlitePool,
+    meeting_id: &str,
+    markdown: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let result_json = serde_json::json!({
+        "markdown": markdown,
+        "format": "markdown",
+        "source": "ai_batch",
+        "sync_status": "pending",
+        "synced_at": &now,
+    })
+    .to_string();
+
+    sqlx::query(
+        "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result)
+         VALUES (?, 'completed', ?, ?, ?)
+         ON CONFLICT(meeting_id) DO UPDATE SET
+            status = 'completed',
+            updated_at = excluded.updated_at,
+            result = excluded.result",
+    )
+    .bind(meeting_id)
+    .bind(&now)
+    .bind(&now)
+    .bind(&result_json)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("не сохранить резюме: {}", e))?;
+
+    // ОТПРАВКА РЕЗЮМЕ НА СЕРВЕР.
+    //
+    // Резюме - отдельная сущность (kind = "summary"), а не часть транскрипта:
+    // раньше здесь вызывалась выгрузка встречи, которая шлёт только расшифровку,
+    // поэтому по ссылке «Поделиться» резюме не появлялось.
+    // Уважаем «только локально»: помеченные встречи не отправляем.
+    let locally_only = crate::database::repositories::meeting::MeetingsRepository::get_cloud_opt_out(pool, meeting_id)
+        .await
+        .unwrap_or(false);
+
+    if !locally_only {
+        let settings = crate::insapp_server::load_settings(pool).await;
+        let api_key = crate::insapp_server::get_api_key();
+        let title: String = sqlx::query_as::<_, (String,)>("SELECT title FROM meetings WHERE id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(t,)| t)
+            .unwrap_or_else(|| "Встреча".to_string());
+
+        let st = crate::insapp_server_commands::sync_summary_to_server(
+            pool, meeting_id, &title, &settings, &api_key,
+        )
+        .await;
+        log::info!("[bulk-summary] отправка резюме {}: {}", meeting_id, st);
+    }
+
+    let _ = app.emit("summary-updated", serde_json::json!({ "meeting_id": meeting_id }));
+    Ok(())
 }
