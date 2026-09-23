@@ -1,31 +1,40 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, Cloud, CloudOff, CloudUpload, Loader2, ChevronUp, CheckCircle2, AlertCircle } from "lucide-react";
+import { Sparkles, Cloud, CloudOff, CloudUpload, Loader2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { TerminalPanel } from "./TerminalPanel";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { useSummaryJobs, useElapsed, humanSummaryError, openClaudeLogin } from "@/hooks/useSummaryJobs";
 
 interface AiTerminalLauncherProps {
   meetingId: string;
   meetingTitle: string;
+  /** Больше не нужен: резюме приходит событием ai-summary-saved. Оставлен для совместимости. */
   onSummarySaved?: (markdown: string) => void;
+  /** У встречи уже есть резюме - перед пересозданием спросим подтверждение. */
+  hasSummary?: boolean;
 }
 
 /**
- * Inline header: gradient AI button + icon-only status кнопки.
- * Все элементы h-8, в одну строку, с tooltips.
+ * Шапка встречи: кнопка AI-резюме + иконка статуса транскрипта.
+ *
+ * Резюме делается В ФОНЕ (без терминала): бэкенд запускает Claude Sonnet,
+ * кнопка показывает «Готовится 1:23», по готовности страница сама подтягивает
+ * резюме (событие ai-summary-saved), а всплывашка «Готово» видна на любом экране.
  */
 export function AiTerminalLauncher({
   meetingId,
-  meetingTitle,
-  onSummarySaved,
+  hasSummary = false,
 }: AiTerminalLauncherProps) {
-  const [terminalState, setTerminalState] = useState<
-    "closed" | "open" | "minimized"
-  >("closed");
+  const jobs = useSummaryJobs();
+  const startedMs = jobs[meetingId];
+  const running = startedMs !== undefined;
+  const elapsed = useElapsed(startedMs);
+  const [starting, setStarting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [transcriptSync, setTranscriptSync] = useState<string>("unknown");
   const [isResending, setIsResending] = useState(false);
 
@@ -60,6 +69,29 @@ export function AiTerminalLauncher({
       toast.error("Ошибка отправки", { description: String(e) });
     } finally {
       setIsResending(false);
+    }
+  };
+
+  /** Запустить резюме в фоне. Ошибка входа в Claude - сразу предлагаем войти. */
+  const startSummary = async () => {
+    setConfirmOpen(false);
+    setStarting(true);
+    try {
+      await invoke("ai_summary_generate", { meetingId });
+      // Дальше всё показывают кнопка («Готовится») и всплывашки - события от бэкенда.
+    } catch (e) {
+      const err = humanSummaryError(e);
+      if (err.auth) {
+        toast.error("Резюме не запущено", {
+          description: err.text,
+          duration: 15000,
+          action: { label: "Войти в Claude", onClick: () => openClaudeLogin() },
+        });
+      } else {
+        toast.error("Резюме не запущено", { description: err.text });
+      }
+    } finally {
+      setStarting(false);
     }
   };
 
@@ -129,52 +161,62 @@ export function AiTerminalLauncher({
     );
   };
 
+  const busy = running || starting;
+  const label = running
+    ? `Готовится ${elapsed}`
+    : starting
+      ? "Запускаю..."
+      : hasSummary
+        ? "Сделать заново"
+        : "Сделать AI-резюме";
+
+  const mainButton = (
+    <Button
+      variant="ai"
+      size="sm"
+      disabled={busy}
+      onClick={hasSummary ? undefined : startSummary}
+      title={running ? "Claude пишет резюме в фоне - можно закрыть встречу и работать дальше" : undefined}
+      className="disabled:opacity-90"
+    >
+      {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}
+      {label}
+    </Button>
+  );
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex items-center gap-1.5 flex-wrap">
-        <Button
-          variant="ai"
-          size="sm"
-          onClick={() => setTerminalState("open")}
-        >
-          <Sparkles />
-          {terminalState === "minimized" ? "Открыть AI-резюме" : "Сделать AI-резюме"}
-        </Button>
+        {hasSummary && !busy ? (
+          <Popover open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <PopoverTrigger asChild>{mainButton}</PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-4">
+              <p className="text-[13.5px] font-medium text-foreground">Сделать резюме заново?</p>
+              <p className="mt-1 text-[12.5px] text-muted-foreground">
+                Текущее резюме заменится новым. Claude напишет его в фоне за 1-3 минуты.
+              </p>
+              <div className="mt-3 flex justify-end gap-2">
+                <button
+                  onClick={() => setConfirmOpen(false)}
+                  className="rounded-md border border-border px-3 py-1.5 text-[12.5px] text-foreground hover:bg-secondary"
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={startSummary}
+                  className="rounded-md bg-foreground px-3 py-1.5 text-[12.5px] font-medium text-background hover:opacity-90"
+                >
+                  Сделать заново
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          mainButton
+        )}
 
         {renderTranscriptStatusIcon()}
       </div>
-
-      {/* Terminal panel */}
-      {terminalState !== "closed" && (
-        <div
-          className="fixed inset-y-0 right-0 z-40 w-full max-w-2xl border-l border-border shadow-2xl bg-card flex flex-col"
-          style={{ display: terminalState === "minimized" ? "none" : "flex" }}
-        >
-          <TerminalPanel
-            meetingId={meetingId}
-            meetingTitle={meetingTitle}
-            wasUploadedToServer={transcriptSync === "sent"}
-            onMinimize={() => setTerminalState("minimized")}
-            onClose={() => setTerminalState("closed")}
-            onSummarySaved={(md) => {
-              if (onSummarySaved) onSummarySaved(md);
-            }}
-          />
-        </div>
-      )}
-
-      {/* Floating reopen */}
-      {terminalState === "minimized" && (
-        <button
-          onClick={() => setTerminalState("open")}
-          className="fixed bottom-6 right-6 z-30 flex items-center gap-2 px-4 py-2.5 bg-card border border-border rounded-full shadow-lg hover:shadow-xl transition-shadow"
-          title="Развернуть AI-резюме"
-        >
-          <Sparkles className="w-4 h-4 text-blue-600 stroke-[1.75]" />
-          <span className="text-sm font-medium text-foreground">AI-резюме работает</span>
-          <ChevronUp className="w-3.5 h-3.5 text-muted-foreground stroke-[1.75]" />
-        </button>
-      )}
     </TooltipProvider>
   );
 }

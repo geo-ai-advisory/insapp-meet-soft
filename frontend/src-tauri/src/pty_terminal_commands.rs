@@ -76,6 +76,17 @@ pub struct AiSummarySettings {
     pub prompt_template: String,
     /// Использовать ли --print флаг (для claude/codex), чтобы получить stdout (а не интерактив).
     pub use_print_mode: bool,
+    /// Модель Claude для фоновых резюме. «sonnet» - псевдоним CLI для ПОСЛЕДНЕЙ версии
+    /// Sonnet: при выходе новой модели ничего менять не нужно.
+    #[serde(default = "default_summary_model")]
+    pub model: String,
+    /// Сразу после завершения встречи делать резюме в фоне (только Claude).
+    #[serde(default)]
+    pub auto_summary: bool,
+}
+
+fn default_summary_model() -> String {
+    "sonnet".to_string()
 }
 
 impl Default for AiSummarySettings {
@@ -89,6 +100,8 @@ impl Default for AiSummarySettings {
             // claude провайдер всегда использует --print + bypassPermissions
             // (см. build_cli_invocation). Флаг оставлен для custom-команд.
             use_print_mode: true,
+            model: default_summary_model(),
+            auto_summary: false,
         }
     }
 }
@@ -210,6 +223,13 @@ pub async fn ai_summary_save_settings<R: Runtime>(
     settings: AiSummarySettings,
 ) -> Result<(), String> {
     let pool = state.db_manager.pool();
+    // Галочку авто-резюме и модель экран настроек не показывает: берём их из
+    // сохранённого, иначе старая копия настроек на экране молча выключила бы
+    // авто-резюме, включённое на главной.
+    let current = load_ai_settings(pool).await;
+    let mut settings = settings;
+    settings.auto_summary = current.auto_summary;
+    settings.model = current.model;
     save_ai_settings(pool, &settings)
         .await
         .map_err(|e| format!("Не удалось сохранить настройки AI-резюме: {}", e))
@@ -953,17 +973,301 @@ async fn prepare_transcript_file<R: Runtime>(
     Ok((file, title))
 }
 
+/// Метка ошибки «Claude не авторизован» - по ней интерфейс предлагает «Войти в Claude».
+pub const AUTH_ERROR: &str = "AUTH: Claude не авторизован - войди в свой аккаунт Claude";
+
+/// Похоже ли сообщение CLI на истёкший/отсутствующий вход.
+fn is_auth_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    ["failed to authenticate", "oauth", "not logged in", "please run /login", "invalid api key", "authentication_error", "login required"]
+        .iter()
+        .any(|k| m.contains(k))
+}
+
+/// Путь к CLI (с обогащённым PATH: у GUI-приложения урезанный PATH).
+fn resolve_cli(command: &str) -> Option<PathBuf> {
+    let p = std::path::Path::new(command);
+    if p.is_absolute() && p.exists() {
+        return Some(p.to_path_buf());
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    which::which_in(command, Some(crate::pty_terminal::enriched_path()), cwd).ok()
+}
+
+/// Вошёл ли пользователь в Claude. Проверка локальная и бесплатная
+/// (`claude auth status --json`), запросов к модели не делает.
+async fn claude_logged_in(cli: &std::path::Path) -> Option<bool> {
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::process::Command::new(cli)
+            .args(["auth", "status", "--json"])
+            .env("PATH", crate::pty_terminal::enriched_path())
+            .stdin(std::process::Stdio::null())
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
+    v.get("loggedIn").and_then(|x| x.as_bool())
+}
+
+/// Готовность фоновых резюме - для галочки на главной и кнопки на встрече.
+#[derive(Debug, Clone, Serialize)]
+pub struct SummaryReadiness {
+    pub provider: String,
+    /// Путь к CLI, если найден.
+    pub cli_path: Option<String>,
+    /// Для Claude: вошёл ли пользователь (None - не удалось проверить).
+    pub logged_in: Option<bool>,
+    /// Всё готово для фоновых резюме через Claude.
+    pub claude_ready: bool,
+    pub auto_summary: bool,
+    pub model: String,
+}
+
+async fn readiness(pool: &SqlitePool) -> SummaryReadiness {
+    let s = load_ai_settings(pool).await;
+    let cli = resolve_cli(&s.command);
+    let logged_in = match (&cli, s.provider.as_str()) {
+        (Some(p), "claude") => claude_logged_in(p).await,
+        _ => None,
+    };
+    SummaryReadiness {
+        claude_ready: s.provider == "claude" && cli.is_some() && logged_in == Some(true),
+        provider: s.provider.clone(),
+        cli_path: cli.map(|p| p.to_string_lossy().to_string()),
+        logged_in,
+        auto_summary: s.auto_summary,
+        model: s.model.clone(),
+    }
+}
+
+#[tauri::command]
+pub async fn ai_summary_status<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<SummaryReadiness, String> {
+    Ok(readiness(state.db_manager.pool()).await)
+}
+
+/// Включить/выключить авто-резюме после встречи.
+#[tauri::command]
+pub async fn ai_summary_set_auto<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<SummaryReadiness, String> {
+    let pool = state.db_manager.pool();
+    let mut s = load_ai_settings(pool).await;
+    s.auto_summary = enabled;
+    save_ai_settings(pool, &s)
+        .await
+        .map_err(|e| format!("Не удалось сохранить настройку: {}", e))?;
+    Ok(readiness(pool).await)
+}
+
+// ------------------------------------------------------------
+// Фоновые резюме: одна встреча = одно задание, без терминала.
+// Используются кнопкой «Сделать AI-резюме» и авто-резюме после встречи.
+// ------------------------------------------------------------
+
+/// Встречи, для которых резюме готовится прямо сейчас: id -> (начало, мс; источник).
+static SUMMARY_JOBS: once_cell::sync::Lazy<std::sync::Mutex<HashMap<String, (u64, String)>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SummaryJobEvent {
+    pub meeting_id: String,
+    pub title: String,
+    /// "running" | "done" | "error"
+    pub state: String,
+    /// "manual" | "auto"
+    pub source: String,
+    pub started_ms: u64,
+    pub error: Option<String>,
+    /// Ошибка - из-за отсутствия входа в Claude.
+    pub auth_error: bool,
+}
+
+async fn meeting_title(pool: &SqlitePool, meeting_id: &str) -> String {
+    sqlx::query_as::<_, (String,)>("SELECT title FROM meetings WHERE id = ?")
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(t,)| t)
+        .unwrap_or_default()
+}
+
+/// Запустить фоновое резюме встречи. Возвращается сразу; ход работы - событиями
+/// `summary-job`, готовое резюме - событием `ai-summary-saved` (страница встречи
+/// подхватывает его сама).
+pub async fn start_summary_job<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    pool: SqlitePool,
+    meeting_id: String,
+    source: &str,
+) -> Result<(), String> {
+    // Встреча уже в работе - не запускаем второй раз (двойной клик, авто + кнопка,
+    // обработка в окне «Резюме для всех»).
+    let busy_in_batch = BATCH_RUNNING.load(std::sync::atomic::Ordering::Relaxed)
+        && BATCH_STATE
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().and_then(|st| st.current_id.clone()))
+            .as_deref()
+            == Some(meeting_id.as_str());
+    let started_ms = now_ms();
+    {
+        let mut jobs = SUMMARY_JOBS.lock().map_err(|_| "jobs lock".to_string())?;
+        if busy_in_batch || jobs.contains_key(&meeting_id) {
+            return Err("Резюме этой встречи уже готовится".to_string());
+        }
+        jobs.insert(meeting_id.clone(), (started_ms, source.to_string()));
+    }
+
+    let settings = load_ai_settings(&pool).await;
+    let title = meeting_title(&pool, &meeting_id).await;
+    let ev = |state: &str, error: Option<String>| SummaryJobEvent {
+        meeting_id: meeting_id.clone(),
+        title: title.clone(),
+        state: state.to_string(),
+        source: source.to_string(),
+        started_ms,
+        auth_error: error.as_deref() == Some(AUTH_ERROR),
+        error,
+    };
+    let _ = app.emit("summary-job", ev("running", None));
+    let running = ev("running", None);
+
+    tauri::async_runtime::spawn(async move {
+        let mid = running.meeting_id.clone();
+        let result = match prepare_transcript_file(&app, &pool, &mid).await {
+            Ok((file, t)) => {
+                let r = run_cli_once(&settings, &file, &t, false).await;
+                let _ = std::fs::remove_file(&file);
+                match r {
+                    Ok(markdown) => save_summary_markdown(&app, &pool, &mid, &markdown).await,
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        };
+        if let Ok(mut jobs) = SUMMARY_JOBS.lock() {
+            jobs.remove(&mid);
+        }
+        let mut done = running.clone();
+        match result {
+            Ok(()) => {
+                done.state = "done".to_string();
+                log::info!("[summary-job] резюме {} готово ({})", mid, done.source);
+                let _ = app.emit("ai-summary-saved", mid.clone());
+            }
+            Err(e) => {
+                done.state = "error".to_string();
+                done.auth_error = e == AUTH_ERROR;
+                done.error = Some(e.clone());
+                log::warn!("[summary-job] резюме {} не получилось: {}", mid, e);
+            }
+        }
+        let _ = app.emit("summary-job", done);
+    });
+    Ok(())
+}
+
+/// Кнопка «Сделать AI-резюме»: резюме в фоне, без терминала.
+#[tauri::command]
+pub async fn ai_summary_generate<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool().clone();
+    let r = readiness(&pool).await;
+    if r.cli_path.is_none() {
+        return Err("Не найден инструмент для резюме. Проверь настройки AI-резюме.".to_string());
+    }
+    if r.provider == "claude" && r.logged_in == Some(false) {
+        return Err(AUTH_ERROR.to_string());
+    }
+    start_summary_job(app, pool, meeting_id, "manual").await
+}
+
+/// Какие встречи сейчас в работе - чтобы открытая страница показала «готовится».
+#[tauri::command]
+pub fn ai_summary_jobs() -> Vec<serde_json::Value> {
+    SUMMARY_JOBS
+        .lock()
+        .map(|j| {
+            j.iter()
+                .map(|(id, (ms, src))| serde_json::json!({ "meeting_id": id, "started_ms": ms, "source": src }))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Авто-резюме после завершения встречи: если галочка включена и Claude готов.
+/// Вызывается после сохранения встречи; ничего не ждёт и ничего не ломает при отказе.
+pub fn maybe_auto_summary<R: Runtime>(app: tauri::AppHandle<R>, pool: SqlitePool, meeting_id: String) {
+    tauri::async_runtime::spawn(async move {
+        let r = readiness(&pool).await;
+        if !r.auto_summary {
+            return;
+        }
+        if !r.claude_ready {
+            log::warn!("[auto-summary] пропуск {}: Claude не готов (вход: {:?})", meeting_id, r.logged_in);
+            // Сообщаем интерфейсу: авто-резюме включено, но не сработало - нужен вход.
+            let _ = app.emit(
+                "summary-job",
+                SummaryJobEvent {
+                    meeting_id: meeting_id.clone(),
+                    title: meeting_title(&pool, &meeting_id).await,
+                    state: "error".to_string(),
+                    source: "auto".to_string(),
+                    started_ms: now_ms(),
+                    auth_error: r.logged_in == Some(false),
+                    error: Some(if r.logged_in == Some(false) { AUTH_ERROR.to_string() } else { "Claude не настроен".to_string() }),
+                },
+            );
+            return;
+        }
+        // Слишком короткая встреча (проверка звука, случайный старт) - резюме не нужно.
+        let (n, chars): (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(transcript)), 0) FROM transcripts WHERE meeting_id = ?",
+        )
+        .bind(&meeting_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or((0, 0));
+        if n < 8 || chars < 400 {
+            log::info!("[auto-summary] пропуск {}: встреча слишком короткая ({} реплик)", meeting_id, n);
+            return;
+        }
+        if let Err(e) = start_summary_job(app, pool, meeting_id.clone(), "auto").await {
+            log::warn!("[auto-summary] {} не запущено: {}", meeting_id, e);
+        }
+    });
+}
+
 /// Запустить CLI неинтерактивно и получить markdown резюме из stdout.
 async fn run_cli_once(
     settings: &AiSummarySettings,
     transcript_path: &PathBuf,
     title: &str,
+    track_pid: bool,
 ) -> Result<String, String> {
-    let prompt = settings
-        .prompt_template
-        .replace("{title}", title)
-        .replace("{file}", &transcript_path.to_string_lossy())
-        .replace("{output}", "");
+    let prompt = format!(
+        "{}\n\nРЕЖИМ: резюме делается в фоне, собеседника нет. Выведи ТОЛЬКО готовый протокол - \
+         без вопросов, предложений правок и фраз вроде «готов доработать».",
+        settings
+            .prompt_template
+            .replace("{title}", title)
+            .replace("{file}", &transcript_path.to_string_lossy())
+            .replace("{output}", "")
+    );
     let dir = transcript_path
         .parent()
         .map(|p| p.to_string_lossy().to_string())
@@ -977,9 +1281,8 @@ async fn run_cli_once(
         // которые новые версии CLI считают некорректными - тогда claude падает
         // ещё до работы, и резюме не создаётся ни для одной встречи.
         // Подписки это не касается: авторизация хранится отдельно от настроек.
-        "claude" => (
-            settings.command.clone(),
-            vec![
+        "claude" => {
+            let mut a = vec![
                 "--print".to_string(),
                 "--setting-sources".to_string(),
                 "project,local".to_string(),
@@ -989,8 +1292,14 @@ async fn run_cli_once(
                 dir,
                 "--allowedTools".to_string(),
                 "Read".to_string(),
-            ],
-        ),
+            ];
+            // Модель: по умолчанию «sonnet» - всегда последняя версия Sonnet.
+            if !settings.model.trim().is_empty() {
+                a.push("--model".to_string());
+                a.push(settings.model.trim().to_string());
+            }
+            (settings.command.clone(), a)
+        }
         // codex: exec - неинтерактивный режим
         "codex" => (settings.command.clone(), vec!["exec".to_string()]),
         _ => (settings.command.clone(), settings.args.clone()),
@@ -1005,12 +1314,19 @@ async fn run_cli_once(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        // По истечении 12 минут ожидание бросается - вместе с ним снимаем и процесс,
+        // иначе зависший CLI так и висел бы в фоне.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("не запустить {}: {}", cmd, e))?;
 
-    // Запоминаем процесс - чтобы кнопка «Остановить» могла снять его сразу.
-    if let Some(pid) = child.id() {
-        CURRENT_CHILD_PID.store(pid, std::sync::atomic::Ordering::Relaxed);
+    // Запоминаем процесс - чтобы кнопка «Остановить» пакетной генерации могла
+    // снять его сразу. Одиночные фоновые задания сюда не пишем: иначе «Остановить»
+    // в окне «Резюме для всех» снимало бы чужой процесс.
+    if track_pid {
+        if let Some(pid) = child.id() {
+            CURRENT_CHILD_PID.store(pid, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     if let Some(mut stdin) = child.stdin.take() {
@@ -1032,18 +1348,30 @@ async fn run_cli_once(
     .await
     {
         Ok(res) => {
-            CURRENT_CHILD_PID.store(0, std::sync::atomic::Ordering::Relaxed);
+            if track_pid {
+                CURRENT_CHILD_PID.store(0, std::sync::atomic::Ordering::Relaxed);
+            }
             res.map_err(|e| format!("ошибка выполнения {}: {}", cmd, e))?
         }
         Err(_) => {
-            CURRENT_CHILD_PID.store(0, std::sync::atomic::Ordering::Relaxed);
+            if track_pid {
+                CURRENT_CHILD_PID.store(0, std::sync::atomic::Ordering::Relaxed);
+            }
             return Err("обработка заняла больше 12 минут и была остановлена".to_string());
         }
     };
 
     if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("{} вернул ошибку: {}", cmd, err.chars().take(200).collect::<String>()));
+        // CLI часто пишет причину в обычный вывод, а не в поток ошибок - берём оба.
+        let msg = format!(
+            "{} {}",
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
+        if is_auth_error(&msg) {
+            return Err(AUTH_ERROR.to_string());
+        }
+        return Err(format!("{} вернул ошибку: {}", cmd, msg.trim().chars().take(200).collect::<String>()));
     }
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if text.is_empty() {
@@ -1075,6 +1403,15 @@ pub async fn ai_summary_run_batch<R: Runtime>(
             "Не найден инструмент «{}». Проверь настройки AI-резюме.",
             settings.command
         ));
+    }
+    // Вход в Claude истёк - сразу говорим об этом, а не гоним очередь, где каждая
+    // встреча упадёт с той же ошибкой.
+    if settings.provider == "claude" {
+        if let Some(cli) = resolve_cli(&settings.command) {
+            if claude_logged_in(&cli).await == Some(false) {
+                return Err(AUTH_ERROR.to_string());
+            }
+        }
     }
 
     let total = meeting_ids.len();
@@ -1142,7 +1479,7 @@ pub async fn ai_summary_run_batch<R: Runtime>(
             );
 
             let (ok, title, error) = match prepare_transcript_file(&app_bg, &pool, &id).await {
-                Ok((file, title)) => match run_cli_once(&settings, &file, &title).await {
+                Ok((file, title)) => match run_cli_once(&settings, &file, &title, true).await {
                     Ok(markdown) => {
                         let saved = save_summary_markdown(&app_bg, &pool, &id, &markdown).await;
                         let _ = std::fs::remove_file(&file);
@@ -1269,4 +1606,143 @@ async fn save_summary_markdown<R: Runtime>(
 
     let _ = app.emit("summary-updated", serde_json::json!({ "meeting_id": meeting_id }));
     Ok(())
+}
+
+// ------------------------------------------------------------
+// Проверки фоновых резюме (без настоящего Claude: вместо него - заглушка-скрипт,
+// который пишет, с чем его запустили, и отвечает как CLI).
+// Запуск: cargo test --lib summary_job_tests
+// ------------------------------------------------------------
+#[cfg(test)]
+mod summary_job_tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("insapp-summary-test-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Скрипт-заглушка вместо claude.
+    fn fake_cli(dir: &std::path::Path, body: &str) -> PathBuf {
+        let p = dir.join("fake-claude");
+        std::fs::write(&p, format!("#!/bin/bash\n{}\n", body)).unwrap();
+        std::process::Command::new("chmod").args(["+x", p.to_str().unwrap()]).status().unwrap();
+        p
+    }
+
+    fn settings_for(cli: &std::path::Path) -> AiSummarySettings {
+        AiSummarySettings { provider: "claude".into(), command: cli.to_string_lossy().to_string(), ..Default::default() }
+    }
+
+    #[test]
+    fn real_cli_expired_login_text_is_auth_error() {
+        // Дословный ответ claude 2.1.x, когда вход истёк (снят 23.09.2026).
+        assert!(is_auth_error("Failed to authenticate: OAuth session expired and could not be refreshed"));
+        assert!(is_auth_error("Not logged in · Please run /login"));
+        assert!(!is_auth_error("# Протокол встречи\n## Итоги\n- решили запускать витрину"));
+    }
+
+    #[test]
+    fn default_model_is_latest_sonnet_and_auto_is_off() {
+        let s = AiSummarySettings::default();
+        assert_eq!(s.model, "sonnet");
+        assert!(!s.auto_summary);
+        // Старые сохранённые настройки (без новых полей) читаются с теми же значениями.
+        let old = r#"{"provider":"claude","command":"claude","args":[],"format":"markdown","prompt_template":"x","use_print_mode":true}"#;
+        let s: AiSummarySettings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.model, "sonnet");
+        assert!(!s.auto_summary);
+    }
+
+    #[tokio::test]
+    async fn background_run_passes_sonnet_and_returns_protocol() {
+        let dir = temp_dir("ok");
+        let cli = fake_cli(
+            &dir,
+            &format!(
+                r#"printf '%s\n' "$@" > "{d}/args.txt"; cat > "{d}/prompt.txt"; echo '# Протокол'; echo '- итог встречи'"#,
+                d = dir.display()
+            ),
+        );
+        let transcript = dir.join("transcript.txt");
+        std::fs::write(&transcript, "Geo: привет").unwrap();
+
+        let out = run_cli_once(&settings_for(&cli), &transcript, "Синк с продуктом", false).await.unwrap();
+        assert_eq!(out, "# Протокол\n- итог встречи");
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt")).unwrap().lines().map(String::from).collect();
+        assert!(args.contains(&"--print".to_string()), "нет --print: {:?}", args);
+        let i = args.iter().position(|a| a == "--model").expect("нет --model");
+        assert_eq!(args[i + 1], "sonnet");
+
+        let prompt = std::fs::read_to_string(dir.join("prompt.txt")).unwrap();
+        // Название встречи идёт в Claude первой строкой файла расшифровки (prepare_transcript_file),
+        // в самом промпте его нет - проверяем путь к файлу.
+        assert!(prompt.contains(&transcript.to_string_lossy().to_string()), "в промпте нет пути к расшифровке");
+        assert!(prompt.contains("РЕЖИМ: резюме делается в фоне"));
+        assert_eq!(CURRENT_CHILD_PID.load(std::sync::atomic::Ordering::Relaxed), 0, "фоновое задание не должно занимать кнопку «Остановить» пакета");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn expired_login_becomes_auth_error() {
+        let dir = temp_dir("auth");
+        let cli = fake_cli(&dir, r#"cat > /dev/null; echo "Failed to authenticate: OAuth session expired and could not be refreshed"; exit 1"#);
+        let transcript = dir.join("t.txt");
+        std::fs::write(&transcript, "x").unwrap();
+        let err = run_cli_once(&settings_for(&cli), &transcript, "t", false).await.unwrap_err();
+        assert_eq!(err, AUTH_ERROR);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn other_failure_is_not_auth_error() {
+        let dir = temp_dir("fail");
+        let cli = fake_cli(&dir, r#"cat > /dev/null; echo "API Error: 529 overloaded" >&2; exit 1"#);
+        let transcript = dir.join("t.txt");
+        std::fs::write(&transcript, "x").unwrap();
+        let err = run_cli_once(&settings_for(&cli), &transcript, "t", false).await.unwrap_err();
+        assert_ne!(err, AUTH_ERROR);
+        assert!(err.contains("529"), "причина потерялась: {}", err);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn login_status_is_read_from_cli() {
+        let dir = temp_dir("status");
+        let yes = fake_cli(&dir, r#"[ "$1 $2 $3" = "auth status --json" ] && echo '{"loggedIn": true, "authMethod": "claude.ai"}'"#);
+        assert_eq!(claude_logged_in(&yes).await, Some(true));
+        let no = fake_cli(&dir, r#"echo '{"loggedIn": false, "authMethod": "none"}'"#);
+        assert_eq!(claude_logged_in(&no).await, Some(false));
+        let junk = fake_cli(&dir, r#"echo 'command not found'"#);
+        assert_eq!(claude_logged_in(&junk).await, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Зависший CLI снимается вместе с брошенным ожиданием (так работает 12-минутный предел).
+    #[tokio::test]
+    async fn abandoned_wait_kills_process() {
+        let child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        let r = tokio::time::timeout(std::time::Duration::from_millis(300), child.wait_with_output()).await;
+        assert!(r.is_err());
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let alive = std::process::Command::new("kill").args(["-0", &pid.to_string()]).status().unwrap().success();
+        assert!(!alive, "процесс {} остался жить после таймаута", pid);
+    }
+
+    /// Настоящий Claude на этом компьютере (запуск вручную: --ignored).
+    #[tokio::test]
+    #[ignore]
+    async fn real_claude_status_on_this_mac() {
+        let cli = resolve_cli("claude").expect("claude не найден");
+        println!("claude: {:?}, вход: {:?}", cli, claude_logged_in(&cli).await);
+    }
 }

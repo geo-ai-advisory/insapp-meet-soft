@@ -1221,6 +1221,10 @@ pub async fn api_save_transcript<R: Runtime>(
                 )
                 .await
             };
+            // Авто-резюме в фоне (если включено на главной и Claude готов).
+            // Не ждём и не влияем на сохранение: встреча уже сохранена.
+            crate::pty_terminal_commands::maybe_auto_summary(app.clone(), pool.clone(), meeting_id.clone());
+
             let sync_label = match sync_status {
                 crate::insapp_server::SyncStatus::Sent => "sent",
                 crate::insapp_server::SyncStatus::Pending => "pending",

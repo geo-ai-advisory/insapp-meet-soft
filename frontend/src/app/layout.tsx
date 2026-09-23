@@ -30,6 +30,8 @@ import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 // SystemNotificationListener убран - уведомления идут из Rust через terminal-notifier sidecar
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import { installDevTauriMock } from '@/lib/devMock'
+import { SummaryJobToasts } from '@/components/SummaryJobToasts'
+import { ClaudeLoginDialog } from '@/components/ClaudeLoginDialog'
 
 // DEV: мок движка с демо-данными для браузерной вёрстки 1:1 с макетом.
 // В собранном приложении настоящий __TAURI_INTERNALS__ уже есть -> мок не ставится.
@@ -344,6 +346,10 @@ export default function RootLayout({
                               <UpdateChecker />
                               {/* Тост после «Игнорировать» в окне микрофона */}
                               <MicIgnoreToast />
+                              {/* Фоновые резюме: «готовится / готово / ошибка» на любом экране */}
+                              <SummaryJobToasts />
+                              {/* Окно входа в Claude (открывается кнопкой «Войти в Claude») */}
+                              <ClaudeLoginDialog />
 
                               {/* Порядок gate'ов:
                                   1. Онбординг (модели, разрешения) - если не пройден

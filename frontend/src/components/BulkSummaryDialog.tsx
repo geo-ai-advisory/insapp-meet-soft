@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Loader2, Sparkles, X, Check, EyeOff, AlertCircle, Square , RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { humanSummaryError, openClaudeLogin } from '@/hooks/useSummaryJobs';
 
 interface MeetingRow {
   id: string;
@@ -237,8 +238,12 @@ export function BulkSummaryDialog({ open, onClose }: Props) {
       await invoke('ai_summary_run_batch', { meetingIds: ids });
     } catch (e: any) {
       setRunning(false);
-      const msg = typeof e === 'string' ? e : (e?.message || 'не удалось запустить');
-      toast.error('Не получилось запустить создание резюме', { description: msg });
+      const err = humanSummaryError(e);
+      toast.error('Не получилось запустить создание резюме', {
+        description: err.text,
+        duration: err.auth ? 15000 : undefined,
+        action: err.auth ? { label: 'Войти в Claude', onClick: () => openClaudeLogin() } : undefined,
+      });
     }
   }, [selected]);
 
@@ -284,8 +289,11 @@ export function BulkSummaryDialog({ open, onClose }: Props) {
       await invoke('ai_summary_run_batch', { meetingIds: ids });
     } catch (e: any) {
       setRunning(false);
+      const err = humanSummaryError(e);
       toast.error('Не получилось перезапустить', {
-        description: typeof e === 'string' ? e : (e?.message || 'попробуй ещё раз'),
+        description: err.text,
+        duration: err.auth ? 15000 : undefined,
+        action: err.auth ? { label: 'Войти в Claude', onClick: () => openClaudeLogin() } : undefined,
       });
     }
   }, [states]);
@@ -437,7 +445,7 @@ export function BulkSummaryDialog({ open, onClose }: Props) {
                   <span className="min-w-0 flex-1 truncate text-[14px] text-foreground">
                     {m.title}
                     {st === 'error' && errors[m.id] && (
-                      <span className="ml-2 text-[11px] text-amber-600">{errors[m.id].slice(0, 60)}</span>
+                      <span className="ml-2 text-[11px] text-amber-600">{humanSummaryError(errors[m.id]).text.slice(0, 60)}</span>
                     )}
                   </span>
                   <span className="flex-shrink-0 text-[12px] tabular-nums text-muted-foreground">{formatDate(m.created_at)}</span>

@@ -7,6 +7,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { AiTerminalLauncher } from '@/components/AiTerminalLauncher';
+import { useSummaryJobs, useElapsed } from '@/hooks/useSummaryJobs';
 import { SummarySyncBadge } from '@/components/SummarySyncBadge';
 import { Button } from '@/components/ui/button';
 import {
@@ -305,6 +306,7 @@ export function SummaryPanel({
                 meetingId={meeting.id}
                 meetingTitle={meetingTitle}
                 onSummarySaved={onAiSummarySaved}
+                hasSummary={!!aiSummary}
               />
             </div>
           </div>
@@ -518,17 +520,8 @@ export function SummaryPanel({
         </div>
       ) : !aiSummary ? (
         <div className="flex flex-col h-full">
-          {/* Empty state - только подсказка, без старых кнопок.
-              AI-резюме делается через центральную кнопку «Сделать AI-резюме» выше. */}
-          <div className="flex flex-col items-center justify-center flex-1 px-8 text-center text-muted-foreground">
-            <div className="w-16 h-16 mb-4 rounded-2xl bg-accent text-accent-foreground flex items-center justify-center">
-              <span className="text-3xl">🤖</span>
-            </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">Резюме ещё не сделано</h3>
-            <p className="text-sm max-w-md">
-              Нажми «Сделать AI-резюме» сверху - откроется терминал, AI напишет резюме встречи в реальном времени.
-            </p>
-          </div>
+          {/* Empty state: «готовится в фоне» или подсказка про кнопку сверху. */}
+          <SummaryEmptyState meetingId={meeting.id} />
         </div>
       ) : transcripts?.length > 0 && (
         <div className="flex-1 overflow-y-auto min-h-0">
@@ -608,6 +601,42 @@ export function SummaryPanel({
           )}
         </div>
       )
+      )}
+    </div>
+  );
+}
+
+/**
+ * Пустая вкладка «AI-резюме». Если Claude уже пишет резюме в фоне (кнопкой или
+ * автоматически после встречи) - показываем таймер, страница обновится сама.
+ */
+function SummaryEmptyState({ meetingId }: { meetingId: string }) {
+  const jobs = useSummaryJobs();
+  const startedMs = jobs[meetingId];
+  const elapsed = useElapsed(startedMs);
+  const running = startedMs !== undefined;
+
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 px-8 text-center text-muted-foreground">
+      <div className="w-16 h-16 mb-4 rounded-2xl bg-accent text-accent-foreground flex items-center justify-center">
+        {running ? <Loader2 className="w-7 h-7 animate-spin" /> : <span className="text-3xl">🤖</span>}
+      </div>
+      {running ? (
+        <>
+          <h3 className="text-lg font-semibold text-foreground mb-2">Резюме готовится · {elapsed}</h3>
+          <p className="text-sm max-w-md">
+            Claude пишет резюме в фоне, обычно 1-3 минуты. Можно уйти с этой страницы -
+            резюме появится само, придёт уведомление.
+          </p>
+        </>
+      ) : (
+        <>
+          <h3 className="text-lg font-semibold text-foreground mb-2">Резюме ещё не сделано</h3>
+          <p className="text-sm max-w-md">
+            Нажми «Сделать AI-резюме» сверху - Claude напишет его в фоне за 1-3 минуты,
+            можно продолжать работу.
+          </p>
+        </>
       )}
     </div>
   );

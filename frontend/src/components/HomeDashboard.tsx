@@ -7,6 +7,9 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { Sparkles, Check, Cloud, CloudOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { BulkSummaryDialog } from '@/components/BulkSummaryDialog';
+import {
+  useSummaryJobs, useElapsed, useSummaryReadiness, openClaudeLogin, humanSummaryError,
+} from '@/hooks/useSummaryJobs';
 
 /**
  * Главный экран-дашборд - перенос утверждённого макета «Insapp Pro» (вариант B):
@@ -94,8 +97,10 @@ export default function HomeDashboard() {
   const [firstName, setFirstName] = useState('');
   // Массовое создание резюме: окно выбора встреч.
   const [bulkOpen, setBulkOpen] = useState(false);
-  // Какая встреча сейчас в работе по кнопке «Сделать» (в колонке «Резюме»).
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Встречи, у которых резюме готовится в фоне прямо сейчас (id -> старт).
+  const jobs = useSummaryJobs();
+  // Встреча, для которой только что нажали «Сделать» (пока бэкенд принимает задание).
+  const [startingId, setStartingId] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<{ full_name?: string }>('insapp_get_identity')
@@ -122,53 +127,24 @@ export default function HomeDashboard() {
     return () => clearTimeout(t);
   }, []);
 
-  // Создать резюме для одной встречи прямо из списка.
-  //
+  // Создать резюме для одной встречи прямо из списка - в фоне, без терминала.
+  // Ход работы показывают кнопка в строке («Готовится 1:05») и всплывашки;
+  // по готовности список обновится сам (событие summary-job -> meetings-refresh).
   const makeSummary = async (m: any) => {
-    if (busyId) return;
-    setBusyId(m.id);
-
+    if (startingId || jobs[m.id] !== undefined) return;
+    setStartingId(m.id);
     try {
-      await invoke('ai_summary_run_batch', { meetingIds: [m.id] });
-    } catch (e: any) {
-      setBusyId(null);
-      toast.error('Не получилось запустить', {
-        description: typeof e === 'string' ? e : (e?.message || 'попробуй ещё раз'),
+      await invoke('ai_summary_generate', { meetingId: m.id });
+    } catch (e) {
+      const err = humanSummaryError(e);
+      toast.error('Резюме не запущено', {
+        description: err.text,
+        duration: err.auth ? 15000 : undefined,
+        action: err.auth ? { label: 'Войти в Claude', onClick: () => openClaudeLogin() } : undefined,
       });
-      return;
+    } finally {
+      setStartingId(null);
     }
-
-    // Ждём появления резюме, опрашивая список встреч.
-    //
-    // Команда только запускает работу и сразу возвращает управление - само
-    // резюме делается в фоне минуту-другую. Опрос надёжнее подписки на события:
-    // результат виден по фактическому состоянию встречи, а не по сообщению,
-    // которое может не дойти.
-    const started = Date.now();
-    const LIMIT_MS = 13 * 60 * 1000; // чуть больше таймаута обработки в 12 минут
-
-    const tick = async () => {
-      try {
-        const list = await invoke<any[]>('api_get_meetings');
-        const found = list.find((x) => x.id === m.id);
-        if (found?.has_summary) {
-          setBusyId(null);
-          toast.success('Резюме готово', { description: m.title });
-          window.dispatchEvent(new CustomEvent('meetings-refresh'));
-          return;
-        }
-      } catch { /* сеть/база моргнули - просто ждём дальше */ }
-
-      if (Date.now() - started > LIMIT_MS) {
-        setBusyId(null);
-        toast.error('Резюме не получилось', {
-          description: 'Обработка слишком долгая. Попробуй ещё раз.',
-        });
-        return;
-      }
-      setTimeout(tick, 4000);
-    };
-    setTimeout(tick, 4000);
   };
 
   const allMeetings = useMemo(() => meetings || [], [meetings]);
@@ -248,6 +224,9 @@ export default function HomeDashboard() {
             </div>
           </div>
 
+          {/* Авто-резюме после встречи (Claude Sonnet, в фоне) */}
+          <AutoSummaryToggle onOpenSettings={() => router.push('/settings')} />
+
           {/* Недавние встречи - таблица с колонками (как b-table в макете B) */}
           <section>
             {recent.length === 0 ? (
@@ -311,24 +290,12 @@ export default function HomeDashboard() {
                         {(m as any).has_summary ? (
                           <StatusChip ok synced={!!(m as any).summary_synced} okLabel="Есть" />
                         ) : (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); makeSummary(m); }}
-                            disabled={busyId === m.id || !(m as any).has_transcript}
-                            title={!(m as any).has_transcript ? 'Сначала нужна расшифровка встречи' : 'Создать AI-резюме этой встречи'}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
-                          >
-                            {busyId === m.id ? (
-                              <>
-                                <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-primary border-t-transparent" />
-                                Делаю...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-3 w-3 text-primary" />
-                                Сделать
-                              </>
-                            )}
-                          </button>
+                          <RowSummaryButton
+                            startedMs={jobs[m.id]}
+                            starting={startingId === m.id}
+                            hasTranscript={!!(m as any).has_transcript}
+                            onStart={() => makeSummary(m)}
+                          />
                         )}
                       </span>
                     </div>
@@ -343,6 +310,145 @@ export default function HomeDashboard() {
       {/* Массовое создание резюме: выбор встреч, запуск и видимый ход работы.
           Окно само показывает прогресс - закрывать его при запуске не нужно. */}
       <BulkSummaryDialog open={bulkOpen} onClose={() => setBulkOpen(false)} />
+    </div>
+  );
+}
+
+/**
+ * Кнопка «Сделать» в колонке «Резюме». Пока Claude пишет резюме в фоне -
+ * вместо неё таймер «Готовится 1:05».
+ */
+function RowSummaryButton({
+  startedMs, starting, hasTranscript, onStart,
+}: { startedMs?: number; starting: boolean; hasTranscript: boolean; onStart: () => void }) {
+  const elapsed = useElapsed(startedMs);
+  const running = startedMs !== undefined;
+  if (running || starting) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11.5px] font-medium text-primary tabular-nums"
+        title="Claude пишет резюме в фоне - можно работать дальше"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-primary border-t-transparent" />
+        {running ? `Готовится ${elapsed}` : 'Запускаю...'}
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onStart(); }}
+      disabled={!hasTranscript}
+      title={!hasTranscript ? 'Сначала нужна расшифровка встречи' : 'Claude сделает резюме в фоне за 1-3 минуты'}
+      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      <Sparkles className="h-3 w-3 text-primary" />
+      Сделать
+    </button>
+  );
+}
+
+/**
+ * Галочка «Авто-резюме после встречи».
+ *
+ * Включается только когда подключён Claude: выбран в настройках AI-резюме,
+ * установлен на компьютере и выполнен вход в аккаунт. Иначе вместо галочки -
+ * подсказка, что сделать, и кнопка («Войти в Claude» / «Настройки»).
+ * Если галочка уже включена, а вход в Claude слетел - предупреждаем:
+ * резюме не создадутся, пока не войдёшь.
+ */
+function AutoSummaryToggle({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const { readiness, setAuto } = useSummaryReadiness();
+  const [saving, setSaving] = useState(false);
+
+  const checking = readiness === null;
+  const on = !!readiness?.auto_summary;
+  const ready = !!readiness?.claude_ready;
+
+  // Что мешает и какая кнопка это чинит.
+  let hint = '';
+  let warn = false;
+  let action: { label: string; run: () => void } | null = null;
+  if (checking) {
+    hint = 'Проверяю подключение Claude...';
+  } else if (readiness!.provider !== 'claude') {
+    hint = 'Работает только с Claude - выбери его в настройках AI-резюме';
+    action = { label: 'Настройки', run: onOpenSettings };
+  } else if (!readiness!.cli_path) {
+    hint = 'Claude не найден на этом компьютере - проверь настройки AI-резюме';
+    action = { label: 'Настройки', run: onOpenSettings };
+  } else if (!ready) {
+    hint = on
+      ? 'Включено, но вход в Claude истёк - резюме не создадутся, пока не войдёшь'
+      : 'Нужно войти в свой аккаунт Claude';
+    warn = on;
+    action = { label: 'Войти в Claude', run: () => openClaudeLogin() };
+  } else {
+    hint = on
+      ? 'Claude Sonnet напишет резюме в фоне сразу после окончания встречи'
+      : 'Резюме будет появляться само после каждой встречи - Claude Sonnet, в фоне';
+  }
+
+  // Включить можно только при готовом Claude; выключить - всегда.
+  const canToggle = !checking && !saving && (on || ready);
+
+  const toggle = async () => {
+    if (!canToggle) {
+      if (action) action.run();
+      return;
+    }
+    setSaving(true);
+    try {
+      const r = await setAuto(!on);
+      toast.success(r.auto_summary ? 'Авто-резюме включено' : 'Авто-резюме выключено', {
+        description: r.auto_summary ? 'После каждой встречи Claude Sonnet сделает резюме в фоне' : undefined,
+      });
+    } catch (e) {
+      toast.error('Не удалось сохранить', { description: String(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className={`mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-3 ${
+        warn ? 'border-amber-500/40 bg-amber-500/5' : 'border-border bg-background/40'
+      }`}
+    >
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={on}
+        onClick={toggle}
+        className={`flex items-center gap-2.5 text-left ${canToggle ? 'cursor-pointer' : 'cursor-default'}`}
+        title={canToggle ? undefined : hint}
+      >
+        <span
+          className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
+            on
+              ? ready ? 'border-primary bg-primary text-primary-foreground' : 'border-amber-500 bg-amber-500 text-white'
+              : 'border-border bg-card'
+          } ${!canToggle && !on ? 'opacity-50' : ''}`}
+        >
+          {saving ? (
+            <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
+          ) : on ? (
+            <Check className="h-3 w-3" strokeWidth={3} />
+          ) : null}
+        </span>
+        <span className="text-[13.5px] font-medium text-foreground">Авто-резюме после встречи</span>
+      </button>
+      <span className={`min-w-0 flex-1 text-[12.5px] ${warn ? 'text-amber-700' : 'text-muted-foreground'}`}>{hint}</span>
+      {action && (
+        <button
+          type="button"
+          onClick={action.run}
+          className="rounded-lg border border-border bg-card px-3 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-secondary"
+        >
+          {action.label}
+        </button>
+      )}
     </div>
   );
 }
