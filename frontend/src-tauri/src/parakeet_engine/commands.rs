@@ -33,6 +33,11 @@ pub fn set_models_directory<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Get the configured models directory
+/// Для оффлайн-проверок вне Tauri (examples): задать папку моделей напрямую.
+pub fn set_models_directory_for_tests(dir: PathBuf) {
+    *MODELS_DIR.lock().unwrap() = Some(dir);
+}
+
 pub fn get_models_directory() -> Option<PathBuf> {
     MODELS_DIR.lock().unwrap().clone()
 }

@@ -14,8 +14,9 @@
 //! от CoreML-решений, работающих только на Apple.
 
 use once_cell::sync::Lazy;
-use pyannote_rs::{EmbeddingExtractor, EmbeddingManager};
-use std::path::PathBuf;
+use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::value::Tensor;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tracing::{info, warn};
@@ -26,24 +27,32 @@ const WESPEAKER_URL: &str =
 const WESPEAKER_FILE: &str = "wespeaker_en_voxceleb_CAM++.onnx";
 
 /// Максимум различаемых собеседников. Сверх лимита новый голос относим к
-/// ближайшему известному - иначе на шуме плодятся «Собеседник 7, 8, 9...».
-const MAX_SPEAKERS: usize = 6;
+/// ближайшему известному. 8 - на рабочих техничках бывает 7-9 человек (замер 23.09).
+const MAX_SPEAKERS: usize = 8;
 
-/// Порог схожести голосов (косинусная близость). Ниже порога - новый голос.
+/// Порог схожести реплики с «центром голоса» собеседника (косинусная близость).
+/// Выше порога - это тот же человек.
 ///
-/// 0.15 подобран НА РЕАЛЬНЫХ ЗАПИСЯХ, а не взят из документации. Замеры:
-///   - 48-мин встреча (3-4 участника, 363 реплики): 0.15 -> 4 голоса (верно),
-///     0.35 -> 6, 0.50 -> 6 (переразмножение, упор в лимит)
-///   - 3 телефонных звонка (по 2 участника): 0.15 -> 2 голоса в 2 из 3,
-///     0.50 -> 4-5 голосов везде (сильное переразмножение)
-/// Дефолт библиотеки (0.5) стабильно плодит несуществующих собеседников.
-/// Смещаемся в сторону объединения: «двое слиты в одного» воспринимается
-/// заметно лучше, чем пять фантомных собеседников в расшифровке.
-const SIMILARITY_THRESHOLD: f32 = 0.15;
+/// Подобран 23.09.2026 замером на 43 реальных встречах (журнал
+/// Projects/insapp-meet/journals/2026-09-23-diarization-quality): на встречах один
+/// на один даёт ровно одного собеседника, на смесях реплик разных людей - 93%
+/// верной разметки. Сравнение идёт с ЦЕНТРОМ голоса (среднее всех его реплик),
+/// а не с первой репликой: центр устойчив, первая реплика - случайна.
+const ASSIGN_THRESHOLD: f32 = 0.5;
+
+/// Новый голос заводим только по достаточно длинной реплике (сек). Короткая
+/// непохожая реплика - чаще всего тот же человек в плохих условиях (кашель,
+/// шум, обрыв связи), а не новый участник. Её относим к ближайшему голосу.
+const NEW_SPEAKER_MIN_SEC: f32 = 3.0;
 
 /// Минимальная длительность куска речи для надёжного отпечатка (сек).
-/// На более коротких («ага», «да») отпечаток неустойчив - спикера не гадаем.
-const MIN_SEGMENT_SEC: f32 = 0.8;
+/// Короткие («ага», «да») не кластеризуем - приписываем последнему говорившему
+/// собеседнику: это почти всегда продолжение его же реплики.
+const MIN_SEGMENT_SEC: f32 = 1.2;
+
+/// Сколько секунд после реплики собеседника короткие вставки считаем его
+/// продолжением. Больше паузы - вставку никому не приписываем.
+const STICKY_GUEST_SEC: f64 = 10.0;
 
 /// Различать собеседников между собой. Выключено - все чужие голоса идут одной
 /// подписью «Собеседник» (поведение без диаризации). Переключается из UI.
@@ -68,29 +77,80 @@ pub enum SpeakerRole {
     Unknown,
 }
 
-struct Diarizer {
-    extractor: EmbeddingExtractor,
-    manager: EmbeddingManager,
-    /// Кластер голоса владельца записи. Определяется по ПЕРВОЙ достаточно
-    /// длинной реплике с микрофона: кто первым заговорил в микрофон - тот и
-    /// владелец. Дальше его голос узнаётся даже в общем микрофоне (очная
-    /// встреча), а чужие голоса оттуда идут как собеседники.
-    owner_cluster: Option<usize>,
-    /// Кластер голоса -> номер собеседника (1,2,3...). Владелец в нумерацию
-    /// не попадает, поэтому номера у собеседников идут подряд без пропусков.
-    guest_numbers: std::collections::HashMap<usize, usize>,
+/// Модель голосовых отпечатков, запущенная ПРАВИЛЬНО.
+///
+/// ВАЖНО: оптимизации графа ONNX Runtime ВЫКЛЮЧЕНЫ. На этой модели (CAM++) в нашей
+/// версии ONNX Runtime любые оптимизации - даже базовые - молча портят результат:
+/// из тех же признаков звука получается почти случайный отпечаток. Библиотека
+/// pyannote-rs включает самый сильный уровень, и из-за этого до 23.09.2026
+/// разделение собеседников не работало вовсе (то слипалось в «Вы», то дробилось
+/// до потолка в 6 собеседников). Без оптимизаций результат совпадает с эталонным
+/// onnxruntime до 7-го знака, скорость практически та же. НЕ ВКЛЮЧАТЬ обратно.
+struct VoiceModel {
+    session: Session,
 }
 
-impl Diarizer {
-    /// Присвоить/получить номер собеседника для кластера голоса.
-    fn guest_number(&mut self, cluster: usize) -> usize {
-        if let Some(n) = self.guest_numbers.get(&cluster) {
-            return *n;
-        }
-        let n = self.guest_numbers.len() + 1;
-        self.guest_numbers.insert(cluster, n);
-        n
+impl VoiceModel {
+    fn load(path: &Path) -> Result<Self, String> {
+        let session = Session::builder()
+            .and_then(|b| b.with_optimization_level(GraphOptimizationLevel::Disable))
+            .and_then(|b| b.with_intra_threads(2))
+            .and_then(|b| b.commit_from_file(path))
+            .map_err(|e| format!("Не загрузить модель распознавания говорящих: {}", e))?;
+        Ok(Self { session })
     }
+
+    /// Отпечаток голоса (единичной длины). `samples` - моно 16 кГц в диапазоне [-1, 1].
+    fn embed(&mut self, samples: &[f32]) -> Option<Vec<f32>> {
+        let clean: Vec<f32> = samples.iter().map(|x| x.clamp(-1.0, 1.0)).collect();
+        // Kaldi fbank 80 + вычитание среднего по времени - как при обучении модели.
+        let feats = knf_rs::compute_fbank(&clean).ok()?;
+        let (t, bins) = (feats.shape()[0], feats.shape()[1]);
+        if t == 0 {
+            return None;
+        }
+        let data: Vec<f32> = feats.iter().copied().collect();
+        let tensor = Tensor::from_array(([1usize, t, bins], data)).ok()?;
+        let out = self.session.run(ort::inputs!["feats" => tensor]).ok()?;
+        let (_, d) = out.get("embs")?.try_extract_tensor::<f32>().ok()?;
+        let mut e = d.to_vec();
+        let n = e.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if !n.is_finite() || n == 0.0 {
+            return None;
+        }
+        e.iter_mut().for_each(|x| *x /= n);
+        Some(e)
+    }
+}
+
+/// Голос собеседника: сумма отпечатков его реплик (с весом по длительности).
+/// Направление суммы - «центр голоса»: уточняется с каждой репликой.
+struct GuestVoice {
+    sum: Vec<f32>,
+}
+
+impl GuestVoice {
+    fn similarity(&self, e: &[f32]) -> f32 {
+        let n = self.sum.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if n == 0.0 {
+            return -1.0;
+        }
+        self.sum.iter().zip(e).map(|(a, b)| a * b).sum::<f32>() / n
+    }
+
+    fn add(&mut self, e: &[f32], weight: f32) {
+        self.sum.iter_mut().zip(e).for_each(|(s, x)| *s += x * weight);
+    }
+}
+
+struct Diarizer {
+    model: VoiceModel,
+    /// Голоса собеседников в порядке появления: индекс + 1 = номер «Собеседник N».
+    guests: Vec<GuestVoice>,
+    /// Последний определённый собеседник и время его реплики (сек записи).
+    /// Короткие вставки («ага», «да») приписываются ему - это почти всегда
+    /// продолжение той же реплики, а отпечаток на них неустойчив.
+    last_guest: Option<(usize, f64)>,
 }
 
 static DIARIZER: Lazy<Mutex<Option<Diarizer>>> = Lazy::new(|| Mutex::new(None));
@@ -145,16 +205,13 @@ pub async fn init() -> Result<(), String> {
     }
     let path = ensure_model().await?;
 
-    let extractor = EmbeddingExtractor::new(&path)
-        .map_err(|e| format!("Не загрузить модель распознавания говорящих: {}", e))?;
-    let manager = EmbeddingManager::new(MAX_SPEAKERS);
+    let model = VoiceModel::load(&path)?;
 
     let mut guard = DIARIZER.lock().map_err(|_| "diarizer lock".to_string())?;
     *guard = Some(Diarizer {
-        extractor,
-        manager,
-        owner_cluster: None,
-        guest_numbers: std::collections::HashMap::new(),
+        model,
+        guests: Vec::new(),
+        last_guest: None,
     });
     info!("[diarization] распознавание говорящих готово (до {} собеседников)", MAX_SPEAKERS);
     Ok(())
@@ -165,9 +222,8 @@ pub async fn init() -> Result<(), String> {
 pub fn reset() {
     if let Ok(mut guard) = DIARIZER.lock() {
         if let Some(d) = guard.as_mut() {
-            d.manager = EmbeddingManager::new(MAX_SPEAKERS);
-            d.owner_cluster = None;
-            d.guest_numbers.clear();
+            d.guests.clear();
+            d.last_guest = None;
             info!("[diarization] голоса прошлой встречи сброшены");
         }
     }
@@ -183,85 +239,94 @@ pub fn unload() {
     }
 }
 
-/// Определить, кто говорит, по голосу. Работает для ОБОИХ каналов:
+/// Определить, кто говорит.
 ///
-/// - `from_mic = true` (микрофон). В онлайн-встрече там только владелец.
-///   В ОЧНОЙ встрече в общий микрофон попадают все, поэтому голос всё равно
-///   проверяем: совпал с владельцем - «Вы», не совпал - «Собеседник N».
-/// - `from_mic = false` (системный звук) - это всегда собеседники.
+/// ГЛАВНЫЙ принцип - канал решает сторону (подтверждено Geo 26.08):
+/// - `from_mic = true` - микрофон пользователя. Это ВСЕГДА «Вы»: в наушниках
+///   туда физически попадает только владелец. Никакой перекраски по голосу -
+///   прежнее правило «узнаём владельца в любом канале» на реальной встрече
+///   склеивало ВСЕХ собеседников в «Вы» и убило разметку целиком.
+/// - `from_mic = false` - системный звук. Это ВСЕГДА собеседники, владельцем
+///   не бывает. Голосовые отпечатки здесь только НУМЕРУЮТ собеседников
+///   (Собеседник 1/2/3) - ошибка номера не путает стороны разговора.
 ///
-/// `samples` - моно 16 кГц (как отдаёт VAD). Unknown = определить не удалось
-/// (короткая реплика, модель ещё не готова, распознавание выключено).
-pub fn identify_speaker(samples: &[f32], sample_rate: u32, from_mic: bool) -> SpeakerRole {
-    // Распознавание выключено: канал микрофона - владелец, остальное - гость
-    // без номера (прежнее поведение «Вы / Собеседник»).
+/// `samples` - моно 16 кГц (как отдаёт VAD). Unknown = «Собеседник» без номера.
+/// `at_sec` - время начала реплики в записи (сек): по нему короткие вставки
+/// «липнут» к последнему говорившему.
+pub fn identify_speaker(samples: &[f32], sample_rate: u32, from_mic: bool, at_sec: f64) -> SpeakerRole {
+    // Микрофон - всегда владелец, без вариантов.
+    if from_mic {
+        return SpeakerRole::Owner;
+    }
+
+    // Различение собеседников выключено - общая подпись «Собеседник».
     if !get_diarize_guests() {
-        return if from_mic { SpeakerRole::Owner } else { SpeakerRole::Unknown };
+        return SpeakerRole::Unknown;
     }
 
-    // Слишком короткий кусок - отпечаток неустойчив, не гадаем.
-    let duration = samples.len() as f32 / sample_rate.max(1) as f32;
-    if duration < MIN_SEGMENT_SEC {
-        // На коротком куске с микрофона безопаснее считать, что это владелец:
-        // в онлайн-встрече это верно всегда, в очной - в большинстве случаев.
-        return if from_mic { SpeakerRole::Owner } else { SpeakerRole::Unknown };
-    }
-
-    // Модель ждёт 16-битный звук, у нас float - конвертируем с ограничением,
-    // чтобы всплески не «заворачивались» в противоположный знак.
-    let pcm: Vec<i16> = samples
-        .iter()
-        .map(|&x| (x.clamp(-1.0, 1.0) * 32767.0) as i16)
-        .collect();
-
-    let fallback = if from_mic { SpeakerRole::Owner } else { SpeakerRole::Unknown };
+    let now = at_sec;
 
     let mut guard = match DIARIZER.lock() {
         Ok(g) => g,
-        Err(_) => return fallback,
+        Err(_) => return SpeakerRole::Unknown,
     };
     let d = match guard.as_mut() {
         Some(d) => d,
         // Модель ещё качается/не готова - не теряем реплику.
-        None => return fallback,
+        None => return SpeakerRole::Unknown,
     };
 
-    let embedding: Vec<f32> = match d.extractor.compute(&pcm) {
-        Ok(it) => it.collect(),
-        Err(e) => {
-            warn!("[diarization] не посчитать отпечаток голоса: {:?}", e);
-            return fallback;
+    // Короткая вставка («ага», «да») - отпечаток неустойчив. Приписываем
+    // последнему говорившему собеседнику, если он был недавно.
+    let duration = samples.len() as f32 / sample_rate.max(1) as f32;
+    if duration < MIN_SEGMENT_SEC {
+        if let Some((n, t)) = d.last_guest {
+            if now - t <= STICKY_GUEST_SEC {
+                d.last_guest = Some((n, now));
+                return SpeakerRole::Guest(n);
+            }
         }
-    };
-    if embedding.is_empty() {
-        return fallback;
+        return SpeakerRole::Unknown;
     }
 
-    // Лимит исчерпан - относим к ближайшему известному голосу, новых не заводим.
-    let cluster = if d.manager.get_all_speakers().len() >= MAX_SPEAKERS {
-        match d.manager.get_best_speaker_match(embedding) {
-            Ok(c) => c,
-            Err(_) => return fallback,
-        }
-    } else {
-        match d.manager.search_speaker(embedding, SIMILARITY_THRESHOLD) {
-            Some(c) => c,
-            None => return fallback,
+    let embedding = match d.model.embed(samples) {
+        Some(e) => e,
+        None => {
+            warn!("[diarization] не посчитать отпечаток голоса");
+            return SpeakerRole::Unknown;
         }
     };
 
-    // Первый уверенно распознанный голос С МИКРОФОНА - это владелец записи.
-    if from_mic && d.owner_cluster.is_none() {
-        d.owner_cluster = Some(cluster);
-        info!("[diarization] голос владельца записи запомнен");
-        return SpeakerRole::Owner;
-    }
+    // Ближайший из уже известных голосов.
+    let best = d
+        .guests
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (i, g.similarity(&embedding)))
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    if d.owner_cluster == Some(cluster) {
-        // Владельца узнаём в любом канале (его голос может прийти и из
-        // системного звука, если он подключён к встрече со второго устройства).
-        SpeakerRole::Owner
-    } else {
-        SpeakerRole::Guest(d.guest_number(cluster))
-    }
+    let weight = duration.min(10.0);
+    let idx = match best {
+        // Тот же человек; либо реплика слишком короткая, чтобы заводить новый голос;
+        // либо достигнут потолок числа собеседников.
+        Some((i, sim))
+            if sim > ASSIGN_THRESHOLD
+                || duration < NEW_SPEAKER_MIN_SEC
+                || d.guests.len() >= MAX_SPEAKERS =>
+        {
+            d.guests[i].add(&embedding, weight);
+            i
+        }
+        // Новый голос.
+        _ => {
+            let mut g = GuestVoice { sum: vec![0.0; embedding.len()] };
+            g.add(&embedding, weight);
+            d.guests.push(g);
+            d.guests.len() - 1
+        }
+    };
+
+    let n = idx + 1;
+    d.last_guest = Some((n, now));
+    SpeakerRole::Guest(n)
 }

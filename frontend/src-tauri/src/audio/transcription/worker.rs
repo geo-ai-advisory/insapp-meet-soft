@@ -159,6 +159,7 @@ pub fn start_transcription_task<R: Runtime>(
                                     &chunk.data,
                                     chunk.sample_rate,
                                     from_mic,
+                                    chunk.timestamp,
                                 ) {
                                     SpeakerRole::Owner => "mic".to_string(),
                                     SpeakerRole::Guest(n) => format!("system_{}", n),

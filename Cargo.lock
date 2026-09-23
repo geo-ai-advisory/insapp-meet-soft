@@ -3681,6 +3681,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "infer 0.15.0",
+ "knf-rs",
  "lazy_static",
  "log",
  "memory-stats",
