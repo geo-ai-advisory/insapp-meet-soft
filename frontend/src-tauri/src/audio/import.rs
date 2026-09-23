@@ -284,6 +284,15 @@ pub async fn start_import<R: Runtime>(
 
     match &result {
         Ok(res) => {
+            // Загруженная запись - та же встреча: если на главной включено
+            // авто-резюме, Claude сделает его в фоне, как после обычной записи.
+            if let Some(state) = app.try_state::<crate::state::AppState>() {
+                crate::pty_terminal_commands::maybe_auto_summary(
+                    app.clone(),
+                    state.db_manager.pool().clone(),
+                    res.meeting_id.clone(),
+                );
+            }
             let _ = app.emit(
                 "import-complete",
                 serde_json::json!({
