@@ -20,6 +20,7 @@ import { appDataDir } from '@tauri-apps/api/path';
 import { Loader2, Mic, Upload } from 'lucide-react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
+import { useStartupPermissions, PERMISSIONS_CHANGED_EVENT } from '@/hooks/useStartupPermissions';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { useTranscripts } from '@/contexts/TranscriptContext';
@@ -104,6 +105,12 @@ function EmptySheet({ loading }: { loading: boolean }) {
 function MicPermissionNote() {
   const isLinux = useIsLinux();
   const { hasMicrophone, isChecking, checkPermissions } = usePermissionCheck();
+  // разрешения только что спросили при запуске - перепроверить, чтобы подсказка не висела зря
+  useEffect(() => {
+    const onChange = () => { checkPermissions(); };
+    window.addEventListener(PERMISSIONS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(PERMISSIONS_CHANGED_EVENT, onChange);
+  }, [checkPermissions]);
   if (isLinux || isChecking || hasMicrophone) return null;
   return (
     <div className="mb-2 rounded-[18px] bg-[#FFF6E5] px-3.5 py-2.5 text-[12.5px] leading-[17px] text-[#93370D]">
@@ -155,6 +162,7 @@ export default function UnifiedHome() {
   const { meetingTitle, setMeetingTitle } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
+  useStartupPermissions(recordingState.isRecording);
   const { status, isStopping, isProcessing } = recordingState;
 
   // Hooks
@@ -195,16 +203,21 @@ export default function UnifiedHome() {
     return () => { delete (window as any).requestSaveMeeting; };
   }, []);
 
-  // Startup recovery check
+  // Проверка прерванных записей - ОДИН раз при запуске приложения. Главный экран теперь не
+  // размонтируется после «Стоп» (раньше уходили на страницу встречи), и повторная проверка сразу после
+  // сохранения находила только что остановленную запись -> пустое окно «Recover Interrupted Meetings».
+  const startupCheckDone = useRef(false);
   useEffect(() => {
     const performStartupChecks = async () => {
       try {
+        if (startupCheckDone.current) return;
         if (recordingState.isRecording ||
           status === RecordingStatus.STOPPING ||
           status === RecordingStatus.PROCESSING_TRANSCRIPTS ||
           status === RecordingStatus.SAVING) {
           return;
         }
+        startupCheckDone.current = true;
         try {
           await indexedDBService.deleteOldMeetings(7);
         } catch (error) {
@@ -226,6 +239,10 @@ export default function UnifiedHome() {
 
   // Watch for recoverable meetings changes and show dialog once per session
   useEffect(() => {
+    if (recoverableMeetings.length === 0) {
+      setShowRecoveryDialog(false); // нечего восстанавливать - окно не держим открытым
+      return;
+    }
     if (recoverableMeetings.length > 0) {
       const shownThisSession = sessionStorage.getItem('recovery_dialog_shown');
       if (!shownThisSession) {

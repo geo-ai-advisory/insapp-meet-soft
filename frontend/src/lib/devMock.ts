@@ -449,6 +449,8 @@ export function installDevTauriMock() {
     list_ignored_apps: () => [],
     parakeet_status: () => ({ ready: true }),
     get_app_version: () => '0.4.3',
+    trigger_microphone_permission: () => true,
+    trigger_system_audio_permission_command: () => true,
     voices_list: () => [
       { name: 'Никита Возаков', meetings: 1, minutes: 3 },
       { name: 'Света Семенова', meetings: 1, minutes: 14 },
