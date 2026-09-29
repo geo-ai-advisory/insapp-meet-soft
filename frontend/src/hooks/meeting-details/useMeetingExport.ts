@@ -9,6 +9,17 @@ function isRealTauri(): boolean {
 }
 
 async function copyRich(plain: string, html: string) {
+  // В приложении браузерный ClipboardItem в WebView молча кладёт пустоту - пишем через системный буфер:
+  // HTML (жирный и пункты сохраняются при вставке в Telegram) + обычный текст запасным вариантом.
+  if (isRealTauri()) {
+    try {
+      const { writeHtml } = await import('@tauri-apps/plugin-clipboard-manager');
+      await writeHtml(html, plain);
+      return;
+    } catch { /* плагин недоступен - обычный текст ниже */ }
+    await navigator.clipboard.writeText(plain);
+    return;
+  }
   try {
     if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
       await navigator.clipboard.write([
