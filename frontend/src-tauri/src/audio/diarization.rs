@@ -109,12 +109,12 @@ pub enum SpeakerRole {
 /// разделение собеседников не работало вовсе (то слипалось в «Вы», то дробилось
 /// до потолка в 6 собеседников). Без оптимизаций результат совпадает с эталонным
 /// onnxruntime до 7-го знака, скорость практически та же. НЕ ВКЛЮЧАТЬ обратно.
-struct VoiceModel {
+pub(crate) struct VoiceModel {
     session: Session,
 }
 
 impl VoiceModel {
-    fn load(path: &Path) -> Result<Self, String> {
+    pub(crate) fn load(path: &Path) -> Result<Self, String> {
         let session = Session::builder()
             .and_then(|b| b.with_optimization_level(GraphOptimizationLevel::Disable))
             .and_then(|b| b.with_intra_threads(2))
@@ -124,7 +124,7 @@ impl VoiceModel {
     }
 
     /// Отпечаток голоса (единичной длины). `samples` - моно 16 кГц в диапазоне [-1, 1].
-    fn embed(&mut self, samples: &[f32]) -> Option<Vec<f32>> {
+    pub(crate) fn embed(&mut self, samples: &[f32]) -> Option<Vec<f32>> {
         let clean: Vec<f32> = samples.iter().map(|x| x.clamp(-1.0, 1.0)).collect();
         // Kaldi fbank 80 + вычитание среднего по времени - как при обучении модели.
         let feats = knf_rs::compute_fbank(&clean).ok()?;
@@ -198,6 +198,75 @@ static DIARIZER: Lazy<Mutex<Option<Diarizer>>> = Lazy::new(|| Mutex::new(None));
 static FINAL_RELABEL: Lazy<Mutex<Option<std::collections::HashMap<i64, usize>>>> =
     Lazy::new(|| Mutex::new(None));
 
+/// Голоса итоговых меток встречи: (номер собеседника, центр голоса, секунд речи).
+/// Считаются вместе с FINAL_RELABEL, сохраняются при сохранении встречи (голоса коллег).
+static FINAL_VOICES: Lazy<Mutex<Vec<(usize, Vec<f32>, f32)>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+/// Голоса коллег (имя, центр голоса) - загружаются при старте записи для узнавания.
+static PROFILES: Lazy<Mutex<Vec<(String, Vec<f32>)>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+/// Задать голоса коллег для узнавания в этой записи.
+pub fn set_profiles(profiles: Vec<(String, Vec<f32>)>) {
+    if let Ok(mut p) = PROFILES.lock() {
+        info!("[voices] голосов коллег для узнавания: {}", profiles.len());
+        *p = profiles;
+    }
+}
+
+/// Центр голоса и секунды речи каждой метки (метка 0 пропускается).
+pub fn voices_of(records: &[GuestRecord], labels: &[usize]) -> Vec<(usize, Vec<f32>, f32)> {
+    let mut by: std::collections::BTreeMap<usize, (Vec<f32>, f32)> = Default::default();
+    for (r, &n) in records.iter().zip(labels) {
+        if n == 0 {
+            continue;
+        }
+        let e = by.entry(n).or_insert_with(|| (Vec::new(), 0.0));
+        e.1 += r.dur;
+        if let Some(emb) = r.emb.as_deref() {
+            if e.0.is_empty() {
+                e.0 = vec![0.0; emb.len()];
+            }
+            let w = r.dur.min(10.0);
+            e.0.iter_mut().zip(emb).for_each(|(a, x)| *a += x * w);
+        }
+    }
+    by.into_iter()
+        .filter(|(_, (c, _))| !c.is_empty())
+        .map(|(n, (mut c, sec))| {
+            let norm = c.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm > 0.0 {
+                c.iter_mut().for_each(|x| *x /= norm);
+            }
+            (n, c, sec)
+        })
+        .collect()
+}
+
+/// Забрать голоса итоговых меток (один раз - для сохраняемой встречи).
+pub fn take_final_voices() -> Vec<(usize, Vec<f32>, f32)> {
+    FINAL_VOICES.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
+}
+
+/// Узнать собеседников этой записи по голосам коллег: (номер, имя, похожесть).
+/// Только уверенные совпадения (см. voices::match_profiles); вызывается раз в ~30 с.
+pub fn recognize_live() -> Vec<(usize, String, f32)> {
+    let profiles = match PROFILES.lock() {
+        Ok(p) if !p.is_empty() => p.clone(),
+        _ => return Vec::new(),
+    };
+    let voices = match DIARIZER.lock() {
+        Ok(g) => match g.as_ref() {
+            Some(d) => {
+                let labels: Vec<usize> = d.records.iter().map(|r| r.live).collect();
+                voices_of(&d.records, &labels)
+            }
+            None => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+    crate::audio::voices::match_profiles(&voices, &profiles)
+}
+
 /// Ключ реплики: начало в миллисекундах (одно и то же число приходит из записи и из
 /// сохраняемой расшифровки).
 pub fn segment_key(at_sec: f64) -> i64 {
@@ -205,7 +274,7 @@ pub fn segment_key(at_sec: f64) -> i64 {
 }
 
 /// Путь к файлу модели в общей папке моделей приложения.
-fn model_path() -> Option<PathBuf> {
+pub(crate) fn model_path() -> Option<PathBuf> {
     crate::parakeet_engine::commands::get_models_directory().map(|d| d.join(WESPEAKER_FILE))
 }
 
@@ -281,6 +350,9 @@ pub fn reset() {
     if let Ok(mut f) = FINAL_RELABEL.lock() {
         *f = None;
     }
+    if let Ok(mut v) = FINAL_VOICES.lock() {
+        v.clear();
+    }
 }
 
 /// Освободить память модели (при остановке записи).
@@ -308,6 +380,9 @@ pub fn unload() {
             );
             if let Ok(mut f) = FINAL_RELABEL.lock() {
                 *f = if map.is_empty() { None } else { Some(map) };
+            }
+            if let Ok(mut v) = FINAL_VOICES.lock() {
+                *v = voices_of(&d.records, &labels);
             }
         }
         if guard.is_some() {
@@ -501,7 +576,7 @@ fn rebuild_guests(d: &mut Diarizer) {
     }
 }
 
-fn relabel_impl(records: &[GuestRecord], protect_since: Option<f64>) -> Vec<usize> {
+pub(crate) fn relabel_impl(records: &[GuestRecord], protect_since: Option<f64>) -> Vec<usize> {
     let keep: Vec<usize> = records.iter().map(|r| r.live).collect();
     let long: Vec<usize> = (0..records.len())
         .filter(|&i| records[i].emb.is_some() && records[i].dur >= FINAL_LONG_SEC)

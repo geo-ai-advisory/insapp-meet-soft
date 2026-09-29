@@ -25,6 +25,27 @@ const DEMO_TRANSCRIPT = [
   { id: 6, timestamp: '01:28', speaker: 'Дмитрий', text: 'Я возьму выгрузку из дашборда. Сверю переходы и выдачи по каждому ключу, если где-то просадка - сразу подсвечу.' },
 ];
 
+const DEMO_SUMMARY_MD = [
+  '🗓 **Синк с продуктом: запуск новой витрины МФО**',
+  '28.09.2026 · 42 мин · Geo, Анна Смирнова (продукт), Дмитрий Орлов (аналитика)',
+  '',
+  'Разобрали черновик новой витрины и порядок позиций. Договорились зафиксировать крупный оффер внизу и собрать сводку по конверсии.',
+  '',
+  '## 🎯 Итог',
+  '- **Крупный оффер - на последнюю позицию.** По данным прошлых запусков там конверсия в разы выше, чем на первой строке.',
+  '- **В А/Б-тесте позицию не трогаем**, чтобы не смазать эффект.',
+  '- Черновик витрины у Анны готов, правок по структуре нет.',
+  '',
+  '## ✅ Задачи',
+  '- **Дмитрий:** выгрузка переходов и выдач по каждому ключу из дашборда - до пятницы.',
+  '- **Анна:** финальная раскладка витрины с крупным оффером внизу - к среде.',
+  '- **Geo:** согласовать запуск с партнёром после сводки.',
+  '',
+  '## ⏱ Сроки',
+  '- Сводка по конверсии за 2 недели - **пятница, 2 октября**.',
+  '- Запуск витрины - после согласования сводки.',
+].join('\n');
+
 function isoMinutesAgo(min: number): string {
   return new Date(Date.now() - min * 60 * 1000).toISOString();
 }
@@ -32,7 +53,7 @@ function isoMinutesAgo(min: number): string {
 // --- dev: фоновые резюме и события ---
 let devAuto = false;
 const devJobs: Record<string, number> = {};
-const devSummaries: Record<string, boolean> = {};
+const devSummaries: Record<string, boolean> = { 'demo-1': true };
 const devListeners: { event: string; handler: number; eventId: number }[] = [];
 
 function devSummaryReadiness() {
@@ -131,14 +152,23 @@ export function installDevTauriMock() {
       total_count: DEMO_TRANSCRIPT.length,
     }),
     api_get_summary: (args: any) => devSummaries[args?.meetingId]
-      ? { status: 'completed', data: { markdown: '# Синк с продуктом\n\n## Итоги\n- Крупный оффер - на последнюю строку витрины\n- Сводка по конверсии за 2 недели - до пятницы\n\n## Задачи\n- Дмитрий: выгрузка из дашборда' } }
+      ? { status: 'completed', data: { markdown: DEMO_SUMMARY_MD } }
       : { status: 'idle', summary: null },
     get_meeting_type: () => 'internal',
     api_get_api_key: () => null,
-    get_recording_preferences: () => ({ save_folder: '/Users/geo/Movies/insapp-recordings', auto_save: true, format: 'mp4', mic: null, system: null }),
+    get_recording_preferences: () => ({ save_folder: '/Users/geo/Movies/insapp-recordings', auto_save: true, file_format: 'mp4', format: 'mp4', preferred_mic_device: null, preferred_system_device: null, mic: null, system: null }),
     list_ignored_apps: () => [],
     parakeet_status: () => ({ ready: true }),
-    get_app_version: () => '0.4.0',
+    get_app_version: () => '0.4.3',
+    voices_list: () => [
+      { name: 'Никита Возаков', meetings: 1, minutes: 3 },
+      { name: 'Света Семенова', meetings: 1, minutes: 14 },
+      { name: 'Саша Корнеев', meetings: 1, minutes: 7 },
+      { name: 'Леонид Зайкин', meetings: 1, minutes: 7 },
+    ],
+    voices_learn_now: () => 2,
+    voices_forget: () => 1,
+    get_notification_settings: () => ({ notification_preferences: { show_recording_started: true, show_recording_stopped: true, show_transcription_complete: true } }),
 
     // Фоновые резюме (dev): состояние входа в Claude - ?dev_claude=out|ready|nocli|codex.
     ai_summary_status: () => devSummaryReadiness(),

@@ -38,6 +38,11 @@ pub use super::transcription::TranscriptUpdate;
 // Simple recording state tracking
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
+/// Идёт ли запись (для фоновых задач: не выучивать голоса во время записи).
+pub fn is_recording_now() -> bool {
+    IS_RECORDING.load(Ordering::SeqCst)
+}
+
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 
@@ -51,6 +56,11 @@ static RELABEL_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
     let generation = RELABEL_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     tauri::async_runtime::spawn(async move {
+        // Голоса коллег для узнавания в этой записи (имена из прошлых встреч).
+        if let Some(state) = app.try_state::<crate::state::AppState>() {
+            let profiles = crate::audio::voices::load_profiles(state.db_manager.pool()).await;
+            crate::audio::diarization::set_profiles(profiles);
+        }
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             if RELABEL_GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation {
@@ -64,6 +74,17 @@ fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
             let changes = tauri::async_runtime::spawn_blocking(crate::audio::diarization::relabel_live)
                 .await
                 .unwrap_or_default();
+            // Узнали коллег по голосу - окно записи подставит имена тем, кого ещё не назвали.
+            let known = tauri::async_runtime::spawn_blocking(crate::audio::diarization::recognize_live)
+                .await
+                .unwrap_or_default();
+            if !known.is_empty() {
+                let items: Vec<serde_json::Value> = known
+                    .iter()
+                    .map(|(n, name, sim)| serde_json::json!({ "speaker": format!("system_{}", n), "name": name, "score": sim }))
+                    .collect();
+                let _ = app.emit("speakers-recognized", serde_json::json!({ "items": items }));
+            }
             if changes.is_empty() {
                 continue;
             }

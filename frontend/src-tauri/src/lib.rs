@@ -474,6 +474,22 @@ pub fn run() {
                 }
             });
 
+            // Голоса коллег: через 2 минуты после запуска выучиваем голоса прошлых встреч с
+            // именами (если не идёт запись) - чтобы имена узнавались в следующих встречах.
+            let app_for_voices = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+                if crate::audio::recording_commands::is_recording_now() {
+                    return;
+                }
+                if let Some(state) = app_for_voices.try_state::<crate::state::AppState>() {
+                    let n = crate::audio::voices::learn_past_meetings(state.db_manager.pool(), None).await;
+                    if n > 0 {
+                        log::info!("[voices] выучены голоса прошлых встреч: {}", n);
+                    }
+                }
+            });
+
             // Set Parakeet models directory
             parakeet_engine::commands::set_models_directory(&_app.handle());
 
@@ -667,6 +683,9 @@ pub fn run() {
             api::api_save_meeting_title,
             api::api_set_meeting_type,
             api::api_set_speaker_name,
+            audio::voices::voices_list,
+            audio::voices::voices_forget,
+            audio::voices::voices_learn_now,
             api::api_get_speaker_names,
             api::api_get_meetings_without_summary,
             api::api_skip_summary_for_meetings,

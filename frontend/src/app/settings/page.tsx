@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Settings2, Mic, MicOff, Database as DatabaseIcon, SparkleIcon, FlaskConical, Cloud, UserRound, LogOut } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, MicOff, Database as DatabaseIcon, SparkleIcon, FlaskConical, Cloud, UserRound, LogOut, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { TranscriptSettings } from '@/components/TranscriptSettings';
@@ -11,6 +11,7 @@ import { BetaSettings } from '@/components/BetaSettings';
 import { InsappServerSettings } from '@/components/InsappServerSettings';
 import { AiSummarySettings } from '@/components/AiSummarySettings';
 import { MicIgnoredAppsSettings } from '@/components/MicIgnoredAppsSettings';
+import { VoiceProfilesSettings } from '@/components/VoiceProfilesSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 
 /**
@@ -157,6 +158,10 @@ export default function SettingsPage() {
               transcriptModelConfig={transcriptModelConfig}
               setTranscriptModelConfig={setTranscriptModelConfig}
             />
+          </SettingsSection>
+
+          <SettingsSection icon={Users} title="Голоса коллег" description="Кого приложение узнаёт по голосу во встречах">
+            <VoiceProfilesSettings />
           </SettingsSection>
 
           <SettingsSection icon={SparkleIcon} title="AI-резюме" description="Модель и ключи для генерации резюме">

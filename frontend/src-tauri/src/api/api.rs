@@ -1093,7 +1093,18 @@ pub async fn api_set_speaker_name<R: Runtime>(
     )
     .await
     {
-        Ok(()) => Ok(serde_json::json!({ "ok": true })),
+        Ok(()) => {
+            // Встреча записана до «голосов коллег» - выучим её голоса по звуку в фоне,
+            // чтобы это имя узнавалось в следующих встречах.
+            if speaker_key.starts_with("system") && !crate::audio::recording_commands::is_recording_now() {
+                let pool = pool.clone();
+                let mid = meeting_id.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::audio::voices::learn_past_meetings(&pool, Some(&mid)).await;
+                });
+            }
+            Ok(serde_json::json!({ "ok": true }))
+        }
         Err(e) => {
             log_error!("Failed to set speaker name: {}", e);
             Err(format!("Не удалось сохранить имя участника: {}", e))
@@ -1170,6 +1181,7 @@ pub async fn api_save_transcript<R: Runtime>(
     // собеседников разложены по голосам заново (во время записи двух похожих людей
     // могло слить под один номер). Применяем, только если итог относится именно к
     // этой встрече - большинство реплик собеседников находится по времени начала.
+    let mut final_voices_ok = false;
     if let Some(map) = crate::audio::diarization::take_final_relabel() {
         let guests: Vec<usize> = transcripts_to_save
             .iter()
@@ -1187,6 +1199,7 @@ pub async fn api_save_transcript<R: Runtime>(
             })
             .count();
         if !guests.is_empty() && found * 2 >= guests.len() {
+            final_voices_ok = true;
             let mut changed = 0usize;
             for &i in &guests {
                 let Some(t) = transcripts_to_save[i].audio_start_time else { continue };
@@ -1265,6 +1278,17 @@ pub async fn api_save_transcript<R: Runtime>(
                 )
                 .await
             };
+            // Голоса коллег: сохраняем голоса собеседников этой встречи и подписываем тех,
+            // кого узнали по голосам из прошлых встреч (имена, данные вручную, потом перебьют).
+            let voices = crate::audio::diarization::take_final_voices();
+            if final_voices_ok && !voices.is_empty() {
+                crate::audio::voices::save_meeting_voices(pool, &meeting_id, &voices).await;
+                let named = crate::audio::voices::auto_name_meeting(pool, &meeting_id, &voices).await;
+                if named > 0 {
+                    log_info!("Голоса коллег: подписано по голосу собеседников - {}", named);
+                }
+            }
+
             // Авто-резюме в фоне (если включено на главной и Claude готов).
             // Не ждём и не влияем на сохранение: встреча уже сохранена.
             crate::pty_terminal_commands::maybe_auto_summary(app.clone(), pool.clone(), meeting_id.clone());

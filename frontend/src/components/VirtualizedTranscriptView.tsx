@@ -227,6 +227,41 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         return () => { alive = false; };
     }, [meetingId]);
 
+    // Голоса коллег: во время записи приложение узнаёт собеседников по голосам из прошлых
+    // встреч (имя, данное человеку раньше) и присылает имена. Подставляем только тем, кого
+    // пользователь ещё не назвал, и только имена, которых ещё нет в этой встрече.
+    useEffect(() => {
+        if (meetingId) return;
+        let unlisten: (() => void) | undefined;
+        let alive = true;
+        import('@tauri-apps/api/event')
+            .then(({ listen }) =>
+                listen<{ items: { speaker: string; name: string }[] }>('speakers-recognized', (event) => {
+                    const items = event.payload?.items || [];
+                    if (items.length === 0) return;
+                    setSpeakerNames((prev) => {
+                        const used = new Set(Object.values(prev).map((n) => n.trim().toLowerCase()));
+                        let next: Record<string, string> | null = null;
+                        for (const it of items) {
+                            if (!it.speaker || !it.name || prev[it.speaker]) continue;
+                            if (used.has(it.name.trim().toLowerCase())) continue;
+                            next = next || { ...prev };
+                            next[it.speaker] = it.name;
+                            used.add(it.name.trim().toLowerCase());
+                        }
+                        if (!next) return prev;
+                        try {
+                            sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(next));
+                        } catch { /* не сохранилось - имя всё равно видно на экране */ }
+                        return next;
+                    });
+                }),
+            )
+            .then((fn) => { if (alive) unlisten = fn; else fn(); })
+            .catch(() => { /* dev-браузер без движка */ });
+        return () => { alive = false; if (unlisten) unlisten(); };
+    }, [meetingId]);
+
     const saveSpeakerName = useCallback(async (key: string, name: string) => {
         setSpeakerNames((prev) => {
             const next = { ...prev };
