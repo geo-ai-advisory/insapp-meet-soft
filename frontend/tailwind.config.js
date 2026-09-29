@@ -9,11 +9,50 @@ module.exports = {
   theme: {
   	extend: {
   		fontFamily: {
+  			// Manrope (next/font/google, кириллица) - шрифт интерфейса INmeet
   			sans: [
-  				'var(--font-source-sans-3)'
+  				'var(--font-manrope)',
+  				'system-ui',
+  				'-apple-system',
+  				'Segoe UI',
+  				'sans-serif'
   			]
   		},
+  		boxShadow: {
+  			float: 'var(--im-float)'
+  		},
   		colors: {
+  			// Палитра главного экрана INmeet (эталон b-air): bg-im-bg, text-im-ink, bg-im-tone ...
+  			im: {
+  				bg: 'var(--im-bg)',
+  				sheet: 'var(--im-sheet)',
+  				ink: 'var(--im-ink)',
+  				ink2: 'var(--im-ink2)',
+  				mut: 'var(--im-mut)',
+  				mut2: 'var(--im-mut2)',
+  				mutbg: 'var(--im-mutbg)',
+  				line: 'var(--im-line)',
+  				line2: 'var(--im-line2)',
+  				tone: 'var(--im-tone)',
+  				'tone-h': 'var(--im-tone-h)',
+  				'on-tone': 'var(--im-on-tone)',
+  				'on-tone2': 'var(--im-on-tone2)',
+  				butter: 'var(--im-butter)',
+  				tray: 'var(--im-tray)',
+  				'tray-h': 'var(--im-tray-h)',
+  				panel: 'var(--im-panel)',
+  				bub: 'var(--im-bub)',
+  				data: 'var(--im-data)',
+  				'data-t': 'var(--im-data-t)',
+  				acc: 'var(--im-acc)',
+  				'acc-h': 'var(--im-acc-h)',
+  				hover: 'var(--im-hover)',
+  				bullet: 'var(--im-bullet)',
+  				rec: 'var(--im-rec)',
+  				'rec-h': 'var(--im-rec-h)',
+  				'rec-text': 'var(--im-rec-text)',
+  				dotm: 'var(--im-dotm)'
+  			},
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			border: 'hsl(var(--border))',

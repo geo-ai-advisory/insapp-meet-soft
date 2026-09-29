@@ -1,10 +1,8 @@
 'use client'
 
 import './globals.css'
-import { Inter } from 'next/font/google'
-import Sidebar from '@/components/Sidebar'
+import { Manrope } from 'next/font/google'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
-import MainContent from '@/components/MainContent'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { Toaster, toast } from 'sonner'
 import "sonner/dist/styles.css"
@@ -40,11 +38,12 @@ if (typeof window !== 'undefined') {
 }
 
 
-// Шрифт интерфейса — Inter (как в утверждённом макете). Cyrillic для русского текста.
-const sourceSans3 = Inter({
+// Шрифт интерфейса - Manrope (финальный дизайн INmeet, 29.09.2026). next/font/google
+// скачивает шрифт при сборке и кладёт в приложение: кириллица есть, работает офлайн.
+const manrope = Manrope({
   subsets: ['latin', 'cyrillic'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-source-sans-3',
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-manrope',
   display: 'swap',
 })
 
@@ -150,6 +149,15 @@ export default function RootLayout({
         setNeedsIdentity(false)
       })
   }, [])
+
+  // Только светлая тема: снимаем .dark, если его оставила прошлая версия
+  // (раньше был переключатель «Светлая / Тёмная» в боковой панели).
+  useEffect(() => {
+    try {
+      document.documentElement.classList.remove('dark');
+      localStorage.removeItem('insapp-meet-theme');
+    } catch { /* localStorage может быть недоступен */ }
+  }, []);
 
   // Disable context menu in production
   useEffect(() => {
@@ -318,7 +326,7 @@ export default function RootLayout({
   if (isPopupRoute) {
     return (
       <html lang="ru">
-        <body className={`${sourceSans3.variable} font-sans antialiased`}>
+        <body className={`${manrope.variable} font-sans antialiased`}>
           {children}
         </body>
       </html>
@@ -326,8 +334,8 @@ export default function RootLayout({
   }
 
   return (
-    <html lang="en">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
+    <html lang="ru">
+      <body className={`${manrope.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
@@ -354,16 +362,14 @@ export default function RootLayout({
                               {/* Порядок gate'ов:
                                   1. Онбординг (модели, разрешения) - если не пройден
                                   2. IdentityGate (ФИО) - если не зарегистрирован на сервере
-                                  3. Главное приложение */}
+                                  3. Главное приложение. Боковая панель теперь часть главного
+                                     экрана (components/Unified), страницы рисуются во всё окно. */}
                               {showOnboarding ? (
                                 <OnboardingFlow onComplete={handleOnboardingComplete} />
                               ) : needsIdentity === true ? (
                                 <IdentityGate onDone={() => setNeedsIdentity(false)} />
                               ) : (
-                                <div className="flex">
-                                  <Sidebar />
-                                  <MainContent>{children}</MainContent>
-                                </div>
+                                children
                               )}
                               {/* Import audio overlay and dialog */}
                               <ImportDropOverlay visible={showDropOverlay} />
@@ -385,7 +391,7 @@ export default function RootLayout({
           </RecordingStateProvider>
         </AnalyticsProvider>
 
-        <Toaster position="bottom-center" richColors closeButton />
+        <Toaster position="bottom-center" closeButton />
       </body>
     </html>
   )

@@ -55,9 +55,10 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       console.log('Save meeting title success');
       setIsTitleDirty(false);
 
-      // Update meetings with new title
+      // Update meetings with new title (остальные поля встречи - дата, длительность,
+      // статусы - сохраняем, иначе строка в списке теряет их до перечитывания)
       const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
-        m.id === meeting.id ? { id: m.id, title: meetingTitle } : m
+        m.id === meeting.id ? { ...m, title: meetingTitle } : m
       );
       setMeetings(updatedMeetings);
       setCurrentMeeting({ id: meeting.id, title: meetingTitle });
@@ -142,10 +143,10 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
         await handleSaveSummary(aiSummary);
       }
 
-      toast.success("Changes saved successfully");
+      toast.success('Изменения сохранены');
     } catch (error) {
       console.error('Failed to save changes:', error);
-      toast.error("Failed to save changes", { description: String(error) });
+      toast.error('Не удалось сохранить', { description: String(error) });
     } finally {
       setIsSaving(false);
     }
@@ -156,7 +157,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     console.log('📝 Updating meeting title to:', newTitle);
     setMeetingTitle(newTitle);
     const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
-      m.id === meeting.id ? { id: m.id, title: newTitle } : m
+      m.id === meeting.id ? { ...m, title: newTitle } : m
     );
     setMeetings(updatedMeetings);
     setCurrentMeeting({ id: meeting.id, title: newTitle });

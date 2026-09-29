@@ -1,3 +1,5 @@
+// УСТАРЕЛО (29.09.2026): файл больше не подключён - главный экран теперь components/Unified/*
+// (см. design-2026-09-29/impl/CHANGES.md). Не править; удалить отдельной чисткой.
 interface StatusOverlaysProps {
   // Status flags
   isProcessing: boolean;      // Processing transcription after recording stops

@@ -7,6 +7,7 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
+import { resetLiveSpeakerNames } from '@/hooks/useSpeakerNames';
 import { toast } from 'sonner';
 
 interface UseRecordingStartReturn {
@@ -120,6 +121,8 @@ export function useRecordingStart(
 
       // Start the actual backend recording
       console.log('Starting backend recording with meeting:', randomTitle);
+      // Новая запись - имена голосов с прошлой (несохранённой) записи не переносим.
+      resetLiveSpeakerNames();
       await recordingService.startRecordingWithDevices(
         selectedDevices?.micDevice || null,
         selectedDevices?.systemDevice || null,
@@ -189,6 +192,8 @@ export function useRecordingStart(
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
+            // Новая запись - имена голосов с прошлой (несохранённой) записи не переносим.
+            resetLiveSpeakerNames();
             const result = await recordingService.startRecordingWithDevices(
               selectedDevices?.micDevice || null,
               selectedDevices?.systemDevice || null,
@@ -276,6 +281,8 @@ export function useRecordingStart(
         setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
         console.log('Starting backend recording with meeting:', generatedMeetingTitle);
+        // Новая запись - имена голосов с прошлой (несохранённой) записи не переносим.
+        resetLiveSpeakerNames();
         const result = await recordingService.startRecordingWithDevices(
           selectedDevices?.micDevice || null,
           selectedDevices?.systemDevice || null,

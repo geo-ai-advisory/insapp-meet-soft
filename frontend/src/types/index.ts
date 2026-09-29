@@ -111,4 +111,6 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  /** Кто говорит: "mic" (Вы) | "system_N" (собеседник N) | undefined (без разделения). */
+  speaker?: string;
 }

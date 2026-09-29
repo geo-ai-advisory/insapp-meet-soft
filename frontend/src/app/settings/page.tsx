@@ -127,7 +127,11 @@ export default function SettingsPage() {
       <div className="sticky top-0 z-10 flex-none border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-4 px-8 py-5">
           <button
-            onClick={() => router.back()}
+            onClick={() => {
+              // Назад к экрану, с которого пришли (встреча остаётся выбранной); иначе - на главный.
+              if (typeof window !== 'undefined' && window.history.length > 1) router.back();
+              else router.push('/');
+            }}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground no-drag"
           >
             <ArrowLeft className="h-[18px] w-[18px]" />
@@ -135,7 +139,7 @@ export default function SettingsPage() {
           </button>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-foreground">Настройки</h1>
-            <p className="text-[12.5px] text-muted-foreground">Аккаунт, запись звука, модели и обновления Insapp-meet</p>
+            <p className="text-[12.5px] text-muted-foreground">Аккаунт, запись звука, модели и обновления INmeet</p>
           </div>
         </div>
       </div>

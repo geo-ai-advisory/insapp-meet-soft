@@ -12,7 +12,8 @@ interface TranscriptContextType {
   transcripts: Transcript[];
   transcriptsRef: MutableRefObject<Transcript[]>
   addTranscript: (update: TranscriptUpdate) => void;
-  copyTranscript: () => void;
+  /** Скопировать расшифровку; labelFor - подписи участников («Вы», «Анна Смирнова»). */
+  copyTranscript: (labelFor?: (speaker?: string) => string | undefined) => void;
   flushBuffer: () => void;
   transcriptContainerRef: React.RefObject<HTMLDivElement>;
   meetingTitle: string;
@@ -426,6 +427,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: segment.audio_start_time,
             audio_end_time: segment.audio_end_time,
             duration: segment.duration,
+            // Кто говорит - движок отдаёт его в истории; без него после перезагрузки
+            // посреди записи все прошлые реплики теряли подписи «Вы» / «Собеседник N».
+            speaker: segment.speaker,
           }));
 
           setTranscripts(formattedTranscripts);
@@ -497,7 +501,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Copy transcript to clipboard with recording-relative timestamps
-  const copyTranscript = useCallback(() => {
+  const copyTranscript = useCallback((labelFor?: (speaker?: string) => string | undefined) => {
     // Format timestamps as recording-relative [MM:SS] instead of wall-clock time
     const formatTime = (seconds: number | undefined): string => {
       if (seconds === undefined) return '[--:--]';
@@ -506,13 +510,18 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       const secs = totalSecs % 60;
       return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
     };
+    // Кнопка могла передать событие клика вместо функции - подписи тогда не ставим.
+    const label = typeof labelFor === 'function' ? labelFor : undefined;
 
     const fullTranscript = transcripts
-      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
+      .map(t => {
+        const who = label ? label(t.speaker) : undefined;
+        return `${formatTime(t.audio_start_time)} ${who ? `${who}: ` : ''}${t.text}`;
+      })
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 
-    toast.success("Transcript copied to clipboard");
+    toast.success('Расшифровка скопирована', { description: 'Всё, что уже распознано' });
   }, [transcripts]);
 
   // Force flush buffer (for final transcript processing)

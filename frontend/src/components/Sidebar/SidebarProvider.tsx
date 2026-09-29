@@ -51,6 +51,8 @@ interface SidebarContextType {
   stopSummaryPolling: (meetingId: string) => void;
   // Refetch meetings from backend
   refetchMeetings: () => Promise<void>;
+  /** Список встреч уже загружен хотя бы раз (чтобы не мигать «нет встреч» при запуске). */
+  meetingsLoaded: boolean;
 
 }
 
@@ -68,6 +70,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ Новая встреча' });
   const [isCollapsed, setIsCollapsed] = useState(false); // развёрнут по умолчанию (как в референсе WhyNote)
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
+  const [meetingsLoaded, setMeetingsLoaded] = useState(false);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -107,6 +110,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         console.error('Error fetching meetings:', error);
         setMeetings([]);
         Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
+      } finally {
+        setMeetingsLoaded(true);
       }
     }
   }, [serverAddress]);
@@ -331,6 +336,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       startSummaryPolling,
       stopSummaryPolling,
       refetchMeetings: fetchMeetings,
+      meetingsLoaded,
 
     }}>
       {children}

@@ -350,12 +350,12 @@ export function useRecordingStop(
           setStatus(RecordingStatus.COMPLETED);
 
           // Show success toast with navigation option
-          toast.success('Recording saved successfully!', {
-            description: `${freshTranscripts.length} transcript segments saved.`,
+          toast.success('Встреча сохранена', {
+            description: `Реплик в расшифровке: ${freshTranscripts.length}`,
             action: {
-              label: 'View Meeting',
+              label: 'Открыть',
               onClick: () => {
-                router.push(`/meeting-details?id=${meetingId}`);
+                router.push(`/?id=${meetingId}`);
                 Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
               }
             },
@@ -364,7 +364,7 @@ export function useRecordingStop(
 
           // Auto-navigate after a short delay with source parameter
           setTimeout(() => {
-            router.push(`/meeting-details?id=${meetingId}&source=recording`);
+            router.push(`/?id=${meetingId}&source=recording`);
             clearTranscripts()
             Analytics.trackPageView('meeting_details');
 

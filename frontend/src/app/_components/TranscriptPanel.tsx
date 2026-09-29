@@ -1,3 +1,5 @@
+// УСТАРЕЛО (29.09.2026): файл больше не подключён - главный экран теперь components/Unified/*
+// (см. design-2026-09-29/impl/CHANGES.md). Не править; удалить отдельной чисткой.
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { Button } from '@/components/ui/button';
@@ -71,7 +73,7 @@ export function TranscriptPanel({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={copyTranscript}
+                    onClick={() => copyTranscript()}
                     title="Скопировать транскрипт"
                   >
                     <Copy />

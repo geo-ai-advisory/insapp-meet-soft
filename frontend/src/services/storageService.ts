@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { Transcript } from '@/types';
-import { LIVE_SPEAKER_NAMES_KEY } from '@/components/VirtualizedTranscriptView';
+import { LIVE_SPEAKER_NAMES_KEY } from '@/hooks/useSpeakerNames';
 
 export interface SaveMeetingRequest {
   meetingTitle: string;

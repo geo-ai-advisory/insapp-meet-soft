@@ -4,17 +4,19 @@ import { useCallback, useMemo, useRef, useReducer, startTransition, useEffect, u
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
-import { ConfidenceIndicator } from "./ConfidenceIndicator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
-import { RecordingStatusBar } from "./RecordingStatusBar";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
+import { Trash2 } from "lucide-react";
 import { TranscriptSegmentData } from "@/types";
+import { useSpeakerNames, speakerLabel, SpeakerNamesApi, LIVE_SPEAKER_NAMES_KEY } from "@/hooks/useSpeakerNames";
+import { formatTs, initialsOf } from "@/lib/meetingFormat";
+import { Avatar } from "@/components/Unified/primitives";
 
 /**
  * Имена участников, заданные ВО ВРЕМЯ записи (встречи в базе ещё нет).
  * Живут в сессии до сохранения встречи, потом переносятся в неё.
+ * (Константа переехала в hooks/useSpeakerNames, экспорт оставлен для совместимости.)
  */
-export const LIVE_SPEAKER_NAMES_KEY = 'insapp_live_speaker_names';
+export { LIVE_SPEAKER_NAMES_KEY };
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -41,29 +43,32 @@ export interface VirtualizedTranscriptViewProps {
     loadedCount?: number;
     onLoadMore?: () => void;
 
-    /** true на экране встречи (meeting-details). Пустой транскрипт тогда = «в этой встрече
-     *  ничего не записано» + удалить, а не онбординг «начни запись» (тот для главного экрана). */
+    /** true на экране встречи. Пустой транскрипт тогда = «в этой встрече
+     *  ничего не записано» + удалить, а не приглашение начать запись. */
     isMeetingView?: boolean;
     /** Удалить эту (пустую) встречу - кнопка на экране встречи. */
     onDeleteMeeting?: () => void;
     /** id встречи. Нужен, чтобы дать переименовать участников
      *  («Собеседник 1» -> «Иван») и запомнить это для встречи. */
     meetingId?: string;
+
+    // --- Главный экран INmeet (мессенджер) ---
+    /** Имена участников снаружи - общие с шапкой встречи и панелью «Участники».
+     *  Без них лента сама грузит и хранит имена (useSpeakerNames). */
+    speakerNames?: SpeakerNamesApi;
+    /** «назвать» у безымянного голоса: своё действие (на записи - поле имени в панели «Участники»).
+     *  Без него открывается окно «Имя участника». */
+    onNameRequest?: (speakerKey: string) => void;
+    /** Подсветить совпадения поиска. */
+    highlight?: string;
+    /** Текст, если реплик нет (например, поиск ничего не нашёл). */
+    emptyText?: string;
+    /** Отступы ленты (класс). По умолчанию - как в расшифровке встречи. */
+    contentClassName?: string;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
 const VIRTUALIZATION_THRESHOLD = 10;
-
-// Helper function to format seconds as recording-relative time [MM:SS]
-function formatRecordingTime(seconds: number | undefined): string {
-    if (seconds === undefined) return '[--:--]';
-
-    const totalSeconds = Math.floor(seconds);
-    const minutes = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-
-    return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
-}
 
 // Helper function to remove filler words and repetitions
 function cleanStopWords(text: string): string {
@@ -78,109 +83,141 @@ function cleanStopWords(text: string): string {
     return cleanedText.replace(/\s+/g, ' ').trim();
 }
 
-// Цвет имени спикера - стабильный по имени (цветные спикеры как в макете встречи).
-// Палитра 1:1 с эталоном scr-meet: первый спикер синий (#2563EB), второй teal (#14B8A6),
-// далее фиолетовый/янтарь/розовый по кругу.
-const SPEAKER_COLOR_CLASSES = [
-    'text-[hsl(var(--brand-blue))]',
-    'text-teal-500',
-    'text-violet-600',
-    'text-amber-600',
-    'text-rose-600',
-    'text-cyan-600',
-];
-// Цвет назначается по порядку ПЕРВОГО появления спикера во встрече (эталон scr-meet:
-// 1й голос синий, 2й teal, далее violet/amber/...), а НЕ по хешу имени - чтобы главный
-// спикер всегда был фирменным синим.
-function speakerColorByIndex(index: number): string {
-    return SPEAKER_COLOR_CLASSES[index % SPEAKER_COLOR_CLASSES.length];
+/** Подсветка совпадений поиска внутри реплики. */
+function highlightText(text: string, query?: string) {
+    const q = (query || '').trim();
+    if (!q) return text;
+    const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${esc})`, 'gi'));
+    return parts.map((part, i) =>
+        part.toLowerCase() === q.toLowerCase()
+            ? <mark key={i} className="rounded-[3px] bg-[#FFE8A3] px-px text-inherit">{part}</mark>
+            : part
+    );
 }
 
-// Подпись спикера:
-//   "mic"       - канал микрофона            -> «Вы»
-//   "system"    - собеседник не распознан    -> «Собеседник»
-//   "system_N"  - распознанный собеседник N  -> «Собеседник N»
-function speakerLabel(sp?: string): string | undefined {
-    if (!sp) return undefined;
-    if (sp === 'mic') return 'Вы';
-    if (sp === 'system') return 'Собеседник';
-    const guest = /^system_(\d+)$/.exec(sp);
-    if (guest) return `Собеседник ${guest[1]}`;
-    return sp;
-}
-
-// Memoized transcript segment component
-const TranscriptSegment = memo(function TranscriptSegment({
+/** Одна реплика мессенджером: собеседники слева (круглый аватар), мои - справа, голубым. */
+const MessageRow = memo(function MessageRow({
     id,
     timestamp,
     text,
-    speaker,
-    speakerColor,
+    speakerKey,
+    label,
+    isMe,
+    unnamed,
+    firstOfRun,
+    lastOfRun,
+    isFirst,
     confidence,
-    isStreaming,
     showConfidence,
-    onRenameSpeaker,
+    highlight,
+    onRename,
+    onNameRequest,
 }: {
     id: string;
     timestamp: number;
     text: string;
-    speaker?: string;
-    speakerColor?: string;
+    speakerKey?: string;
+    label?: string;
+    isMe: boolean;
+    unnamed: boolean;
+    firstOfRun: boolean;
+    lastOfRun: boolean;
+    isFirst: boolean;
     confidence?: number;
-    isStreaming: boolean;
     showConfidence: boolean;
-    /** Клик по имени участника - переименовать (доступно на экране встречи). */
-    onRenameSpeaker?: () => void;
+    highlight?: string;
+    onRename?: () => void;
+    onNameRequest?: () => void;
 }) {
-    const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const displayText = cleanStopWords(text) || (text.trim() === '' ? '…' : text);
+    const time = formatTs(timestamp);
+    const timeTitle = confidence !== undefined && showConfidence
+        ? `Уверенность распознавания ${Math.round(confidence * 100)}%`
+        : undefined;
+    const pad = isFirst ? '' : firstOfRun ? 'pt-3' : 'pt-[3px]';
+    const name = label ? (
+        onRename ? (
+            <button
+                type="button"
+                onClick={onRename}
+                className="rounded-md hover:text-im-on-tone hover:underline hover:decoration-dotted hover:underline-offset-2"
+                title="Нажмите, чтобы задать имя участника"
+            >
+                {label}
+            </button>
+        ) : <span>{label}</span>
+    ) : null;
+    const bubble = 'text-[14.5px] leading-[21px] pl-3.5 pr-3.5 pt-[9px] pb-2.5 [overflow-wrap:anywhere] im-doc';
+    const inBubbleTime = !firstOfRun && time ? (
+        <time className="float-right -mb-[3px] -mr-0.5 ml-3 mt-[3px] text-[11.5px] leading-[18px] text-im-mut im-num" title={timeTitle}>{time}</time>
+    ) : null;
+
+    if (isMe) {
+        return (
+            <div id={`segment-${id}`} className={`flex justify-end ${pad}`}>
+                <div className="flex min-w-0 max-w-[84%] flex-col items-end">
+                    {firstOfRun && (
+                        <div className="mx-1 mb-1 flex h-[18px] items-center gap-1.5 text-[12.5px] font-semibold leading-[18px] text-im-mut">
+                            <time className="font-normal im-num" title={timeTitle}>{time}</time>
+                            {name}
+                        </div>
+                    )}
+                    <div className={`${bubble} rounded-[18px_6px_18px_18px] bg-im-tone text-im-on-tone`}>
+                        {inBubbleTime}{highlightText(displayText, highlight)}
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div id={`segment-${id}`} className="mb-3.5">
-            {/* Тайм-код отдельной строкой над репликой (эталон scr-meet): приглушённый, tabular-nums. */}
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <span className="block text-xs text-muted-foreground tabular-nums mb-0.5 w-fit">
-                        {formatRecordingTime(timestamp)}
-                    </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                    {confidence !== undefined && showConfidence && (
-                        <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
-                    )}
-                </TooltipContent>
-            </Tooltip>
-            {isStreaming ? (
-                <div className="bg-secondary border border-border rounded-lg px-3 py-2">
-                    <p className="text-[15px] text-foreground leading-relaxed">
-                        {speaker && (
-                            <span
-                                className={`font-semibold ${speakerColor || ''} ${onRenameSpeaker ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : ''}`}
-                                onClick={onRenameSpeaker}
-                                title={onRenameSpeaker ? 'Нажми, чтобы задать имя участника' : undefined}
+        <div id={`segment-${id}`} className={`flex items-end gap-2 ${pad}`}>
+            <div className="mb-px w-[30px] flex-none">
+                {lastOfRun && speakerKey && (
+                    <Avatar initials={unnamed ? '?' : initialsOf(label)} size={30} fontSize={11} title={label} />
+                )}
+            </div>
+            <div className="flex min-w-0 max-w-[calc(90%-38px)] flex-col items-start">
+                {firstOfRun && (
+                    <div className="mb-1 ml-0.5 mr-1 flex h-[18px] items-center gap-1.5 text-[12.5px] font-semibold leading-[18px] text-im-mut">
+                        {name}
+                        <time className="font-normal im-num" title={timeTitle}>{time}</time>
+                        {unnamed && onNameRequest && (
+                            <button
+                                type="button"
+                                onClick={onNameRequest}
+                                className="rounded-md text-[12.5px] font-semibold text-im-on-tone hover:underline hover:underline-offset-[3px]"
                             >
-                                {speaker}:&nbsp;
-                            </span>
+                                назвать
+                            </button>
                         )}
-                        {displayText}
-                    </p>
+                    </div>
+                )}
+                <div
+                    className={`${bubble} rounded-[6px_18px_18px_18px] text-im-ink ${
+                        unnamed ? 'bg-white shadow-[inset_0_0_0_1.5px_var(--im-line2)]' : 'bg-im-bub'
+                    }`}
+                >
+                    {inBubbleTime}{highlightText(displayText, highlight)}
                 </div>
-            ) : (
-                <p className="text-[15px] text-foreground leading-relaxed">
-                    {speaker && (
-                        <span
-                            className={`font-semibold ${speakerColor || ''} ${onRenameSpeaker ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : ''}`}
-                            onClick={onRenameSpeaker}
-                            title={onRenameSpeaker ? 'Нажми, чтобы задать имя участника' : undefined}
-                        >
-                            {speaker}:&nbsp;
-                        </span>
-                    )}
-                    {displayText}
-                </p>
-            )}
+            </div>
         </div>
     );
 });
+
+/** Индикатор «Слушаю…»: живая форма перетекает печенька -> клевер. */
+function ListeningPill({ paused, className = 'self-start' }: { paused: boolean; className?: string }) {
+    return (
+        <div
+            className={`inline-flex h-[38px] flex-none items-center gap-2.5 rounded-[19px] bg-im-bub pl-[11px] pr-4 text-[13.5px] text-im-mut ${paused ? 'im-paused' : ''} ${className}`}
+            aria-live="polite"
+        >
+            <i className="im-morph im-sh-cookie9 block h-[18px] w-[18px] bg-im-acc" aria-hidden="true" />
+            {paused ? 'Запись на паузе' : 'Слушаю…'}
+        </div>
+    );
+}
 
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
@@ -199,106 +236,23 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     isMeetingView = false,
     onDeleteMeeting,
     meetingId,
+    speakerNames,
+    onNameRequest,
+    highlight,
+    emptyText,
+    contentClassName = 'px-4 pb-6 pt-1.5',
 }) => {
     // Пользовательские имена участников: "system_1" -> "Иван".
-    // Грузим для встречи и подставляем вместо автоподписи «Собеседник 1».
-    const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
+    // Если имена пришли снаружи (главный экран) - свои не грузим.
+    const ownNames = useSpeakerNames(meetingId, !speakerNames);
+    const names = speakerNames ?? ownNames;
     const [renamingKey, setRenamingKey] = useState<string | null>(null);
     const [renameValue, setRenameValue] = useState('');
 
-    useEffect(() => {
-        // Идёт запись, встреча ещё не сохранена - имена живут в сессии.
-        // Так участника можно назвать прямо во время разговора, и все его
-        // реплики (уже сказанные и будущие) сразу идут под этим именем.
-        if (!meetingId) {
-            if (typeof window !== 'undefined') {
-                try {
-                    const raw = sessionStorage.getItem(LIVE_SPEAKER_NAMES_KEY);
-                    if (raw) setSpeakerNames(JSON.parse(raw));
-                } catch { /* повреждённое значение - просто автоподписи */ }
-            }
-            return;
-        }
-        let alive = true;
-        import('@tauri-apps/api/core')
-            .then(({ invoke }) => invoke<Record<string, string>>('api_get_speaker_names', { meetingId }))
-            .then((names) => { if (alive && names) setSpeakerNames(names); })
-            .catch(() => { /* имён ещё нет - показываем автоподписи */ });
-        return () => { alive = false; };
-    }, [meetingId]);
-
-    // Голоса коллег: во время записи приложение узнаёт собеседников по голосам из прошлых
-    // встреч (имя, данное человеку раньше) и присылает имена. Подставляем только тем, кого
-    // пользователь ещё не назвал, и только имена, которых ещё нет в этой встрече.
-    useEffect(() => {
-        if (meetingId) return;
-        let unlisten: (() => void) | undefined;
-        let alive = true;
-        import('@tauri-apps/api/event')
-            .then(({ listen }) =>
-                listen<{ items: { speaker: string; name: string }[] }>('speakers-recognized', (event) => {
-                    const items = event.payload?.items || [];
-                    if (items.length === 0) return;
-                    setSpeakerNames((prev) => {
-                        const used = new Set(Object.values(prev).map((n) => n.trim().toLowerCase()));
-                        let next: Record<string, string> | null = null;
-                        for (const it of items) {
-                            if (!it.speaker || !it.name || prev[it.speaker]) continue;
-                            if (used.has(it.name.trim().toLowerCase())) continue;
-                            next = next || { ...prev };
-                            next[it.speaker] = it.name;
-                            used.add(it.name.trim().toLowerCase());
-                        }
-                        if (!next) return prev;
-                        try {
-                            sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(next));
-                        } catch { /* не сохранилось - имя всё равно видно на экране */ }
-                        return next;
-                    });
-                }),
-            )
-            .then((fn) => { if (alive) unlisten = fn; else fn(); })
-            .catch(() => { /* dev-браузер без движка */ });
-        return () => { alive = false; if (unlisten) unlisten(); };
-    }, [meetingId]);
-
     const saveSpeakerName = useCallback(async (key: string, name: string) => {
-        setSpeakerNames((prev) => {
-            const next = { ...prev };
-            if (name.trim()) next[key] = name.trim(); else delete next[key];
-            return next;
-        });
         setRenamingKey(null);
-
-        // Запись идёт, встречи в базе ещё нет: запоминаем в сессии.
-        // При сохранении встречи эти имена перенесутся в неё (см. storageService).
-        if (!meetingId) {
-            if (typeof window !== 'undefined') {
-                try {
-                    const raw = sessionStorage.getItem(LIVE_SPEAKER_NAMES_KEY);
-                    const map: Record<string, string> = raw ? JSON.parse(raw) : {};
-                    if (name.trim()) map[key] = name.trim(); else delete map[key];
-                    sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(map));
-                } catch { /* не сохранилось - имя всё равно видно на экране */ }
-            }
-            return;
-        }
-
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('api_set_speaker_name', { meetingId, speakerKey: key, displayName: name.trim() });
-            // Обновляем встречу на сервере, иначе в дашборде и по ссылке
-            // «Поделиться» осталась бы прежняя подпись («Собеседник 1»).
-            // Встречи, помеченные «только локально», команда не тронет.
-            try {
-                await invoke('insapp_upload_meeting_by_id', { meetingId });
-            } catch (e) {
-                console.warn('[insapp-meet] имя сохранено локально, на сервере обновится позже', e);
-            }
-        } catch (e) {
-            console.warn('[insapp-meet] не удалось сохранить имя участника', e);
-        }
-    }, [meetingId]);
+        await names.saveName(key, name);
+    }, [names]);
 
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -325,7 +279,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const virtualizer = useVirtualizer({
         count: segments.length,
         getScrollElement: () => scrollRef.current,
-        estimateSize: () => 60, // Estimated height per segment
+        estimateSize: () => 64, // Estimated height per message
         overscan: 10, // Render extra items above/below viewport
         onChange: () => {
             startTransition(() => {
@@ -345,8 +299,27 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         disableAutoScroll,
     });
 
+    // Живая запись: при открытии ленты (в том числе при возврате к записи из прошлой встречи
+    // или после перезагрузки с уже распознанными репликами) - сразу к последней реплике.
+    const didInitialScrollRef = useRef(false);
+    useEffect(() => {
+        if (!isRecording || didInitialScrollRef.current || segments.length === 0) return;
+        didInitialScrollRef.current = true;
+        const toBottom = () => {
+            const el = scrollRef.current;
+            if (el) el.scrollTop = el.scrollHeight;
+        };
+        if (segments.length >= VIRTUALIZATION_THRESHOLD) {
+            virtualizer.scrollToIndex(segments.length - 1, { align: 'end' });
+        }
+        // Высоты реплик измеряются после первого кадра - докручиваем ещё пару раз.
+        requestAnimationFrame(toBottom);
+        [120, 300, 700].forEach((ms) => setTimeout(toBottom, ms));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isRecording, segments.length]);
+
     // Streaming text effect hook (typewriter animation for new transcripts)
-    const { streamingSegmentId, getDisplayText } = useTranscriptStreaming(
+    const { getDisplayText } = useTranscriptStreaming(
         segments,
         isRecording,
         enableStreaming
@@ -408,52 +381,90 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         return () => scrollElement.removeEventListener('scroll', handleScroll);
     }, [onLoadMore, hasMore, isLoadingMore, isRecording]);
 
-    // Стабильный цвет спикера по порядку первого появления (как эталон).
-    const speakerColorIndex = useMemo(() => {
-        const m = new Map<string, number>();
-        let n = 0;
-        for (const s of segments) {
-            const sp = (s as any).speaker;
-            if (sp && !m.has(sp)) m.set(sp, n++);
-        }
-        return m;
-    }, [segments]);
-    const colorFor = (sp?: string) => (sp ? speakerColorByIndex(speakerColorIndex.get(sp) ?? 0) : '');
-
-    // Итоговая подпись: заданное пользователем имя, иначе автоматическая
-    // («Вы» / «Собеседник N»).
-    const labelFor = useCallback(
-        (sp?: string) => (sp && speakerNames[sp]) || speakerLabel(sp),
-        [speakerNames]
-    );
+    const labelFor = names.labelFor;
     // Переименовывать можно и в сохранённой встрече, и прямо во время записи.
     const renameHandlerFor = useCallback(
         (sp?: string) => {
             if (!sp) return undefined;
-            return () => { setRenamingKey(sp); setRenameValue(speakerNames[sp] || ''); };
+            return () => { setRenamingKey(sp); setRenameValue(names.names[sp] || ''); };
         },
-        [speakerNames]
+        [names.names]
     );
+    const nameRequestFor = useCallback(
+        (sp?: string) => {
+            if (!sp) return undefined;
+            if (onNameRequest) return () => onNameRequest(sp);
+            return () => { setRenamingKey(sp); setRenameValue(names.names[sp] || ''); };
+        },
+        [names.names, onNameRequest]
+    );
+
+    const renderRow = (index: number) => {
+        const segment = segments[index];
+        const sp = (segment as any).speaker as string | undefined;
+        const prevSp = index > 0 ? (segments[index - 1] as any).speaker : '__none__';
+        const nextSp = index < segments.length - 1 ? (segments[index + 1] as any).speaker : '__none__';
+        const isMe = sp === 'mic';
+        const unnamed = !!sp && !isMe && !names.names[sp];
+        return (
+            <MessageRow
+                id={segment.id}
+                timestamp={segment.timestamp}
+                text={getDisplayText(segment)}
+                speakerKey={sp}
+                label={labelFor(sp)}
+                isMe={isMe}
+                unnamed={unnamed}
+                firstOfRun={index === 0 || prevSp !== sp}
+                lastOfRun={index === segments.length - 1 || nextSp !== sp}
+                isFirst={index === 0}
+                confidence={segment.confidence}
+                showConfidence={showConfidence}
+                highlight={highlight}
+                onRename={renameHandlerFor(sp)}
+                onNameRequest={unnamed ? nameRequestFor(sp) : undefined}
+            />
+        );
+    };
 
     // Use simple rendering for small lists, virtualization for large lists
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
+    const showListening = !isStopping && isRecording && !isProcessing && segments.length > 0;
+
+    const loadMoreBlock = (hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
+        <div ref={loadMoreTriggerRef} className="mt-2 flex items-center justify-center py-4">
+            {isLoadingMore ? (
+                <div className="flex items-center gap-2 text-im-mut">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-im-line border-t-im-acc" />
+                    <span className="text-[13px]">Загружаю ещё…</span>
+                </div>
+            ) : hasMore && totalCount > 0 ? (
+                <span className="text-[13px] text-im-mut">Показано {loadedCount} из {totalCount} реплик</span>
+            ) : null}
+        </div>
+    );
 
     return (
-        <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
+        <div ref={scrollRef} className={`im-scroll im-fade-y flex h-full flex-col overflow-y-auto ${contentClassName}`}>
             {/* Окно «Имя участника»: клик по подписи спикера -> задать своё имя.
                 Имя применяется ко ВСЕМ репликам этого голоса и запоминается за встречей. */}
             {renamingKey && (
                 <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-[#101828]/30 backdrop-blur-[2px]"
                     onClick={() => setRenamingKey(null)}
                 >
                     <div
-                        className="bg-background border border-border rounded-xl shadow-xl p-5 w-[320px]"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Имя участника"
+                        className="w-[340px] rounded-[22px] bg-white p-5 shadow-float"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <p className="text-sm font-semibold text-foreground mb-1">Имя участника</p>
-                        <p className="text-xs text-muted-foreground mb-3">
-                            Заменит подпись «{speakerLabel(renamingKey)}» во всей расшифровке этой встречи.
+                        <p className="mb-1 text-[15px] font-bold text-im-ink">Имя участника</p>
+                        <p className="mb-3 text-[12.5px] leading-[17px] text-im-mut">
+                            {meetingId
+                                ? `Заменит подпись «${speakerLabel(renamingKey)}» во всей расшифровке этой встречи. Чтобы имя попало в резюме, сделайте резюме заново.`
+                                : `Заменит подпись «${speakerLabel(renamingKey)}» во всех репликах - и попадёт в резюме после встречи.`}
                         </p>
                         <input
                             autoFocus
@@ -464,13 +475,13 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 if (e.key === 'Escape') setRenamingKey(null);
                             }}
                             placeholder="Например: Иван Петров"
-                            className="w-full px-3 py-2 text-sm rounded-lg border border-input bg-background text-foreground outline-none focus:ring-2 focus:ring-ring"
+                            className="h-10 w-full rounded-[20px] border-[1.5px] border-im-line2 bg-white px-3.5 text-[14px] text-im-ink outline-none placeholder:text-im-mut focus:border-im-acc"
                         />
-                        <div className="flex justify-between items-center mt-4">
+                        <div className="mt-4 flex items-center justify-between">
                             <button
                                 type="button"
                                 onClick={() => saveSpeakerName(renamingKey, '')}
-                                className="text-xs text-muted-foreground hover:text-foreground"
+                                className="text-[12.5px] font-medium text-im-mut hover:text-im-ink"
                             >
                                 Сбросить
                             </button>
@@ -478,14 +489,14 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 <button
                                     type="button"
                                     onClick={() => setRenamingKey(null)}
-                                    className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-secondary"
+                                    className="h-9 rounded-[18px] bg-white px-3.5 text-[13.5px] font-semibold text-im-ink2 shadow-[inset_0_0_0_1px_var(--im-line2)] hover:bg-im-hover"
                                 >
                                     Отмена
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => saveSpeakerName(renamingKey, renameValue)}
-                                    className="px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:opacity-90"
+                                    className="h-9 rounded-[18px] bg-im-acc px-4 text-[13.5px] font-semibold text-white hover:bg-im-acc-h"
                                 >
                                     Сохранить
                                 </button>
@@ -494,73 +505,59 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     </div>
                 </div>
             )}
-            {/* Индикация записи (статус «Идёт запись» / таймер / уровень) теперь живёт в
-                НИЖНЕМ ДОКЕ (RecordingDockStatus) - дубль-бар в ленте убран, чтобы текст
-                расшифровки ничего не отвлекало (компоновка «нижний док», вариант B). */}
 
-            {/* Content - add padding when recording to prevent overlap */}
-            <div className={isRecording ? 'pt-2' : ''}>
             {segments.length === 0 ? (
                 // Empty state
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="text-center text-muted-foreground mt-8"
+                    className="flex flex-1 flex-col items-center justify-center px-6 text-center"
                 >
                     {isRecording ? (
                         <>
-                            <div className="flex items-center justify-center mb-3">
-                                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-blue-500 animate-pulse'}`}></div>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                {isPaused ? 'Запись на паузе' : 'Слушаю речь...'}
-                            </p>
-                            <p className="text-xs mt-1 text-muted-foreground">
-                                {isPaused ? 'Нажми «Продолжить», чтобы возобновить запись' : 'Говори - расшифровка появится в реальном времени'}
+                            <ListeningPill paused={isPaused} className="self-center" />
+                            <p className="mt-3 max-w-[300px] text-[13px] leading-[19px] text-im-mut">
+                                {isPaused ? 'Нажмите «Продолжить», чтобы возобновить запись' : 'Говорите - расшифровка появится здесь в реальном времени'}
                             </p>
                             {showMicHint && !isPaused && (
-                                <div className="mt-5 mx-auto max-w-sm rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-left">
-                                    <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">Не слышу звук с микрофона</p>
-                                    <p className="text-[11px] mt-1 leading-relaxed text-amber-600 dark:text-amber-400/80">
+                                <div className="mt-5 max-w-sm rounded-[18px] bg-[#FFF6E5] px-4 py-3 text-left">
+                                    <p className="text-[12.5px] font-semibold text-[#93370D]">Не слышу звук с микрофона</p>
+                                    <p className="mt-1 text-[12px] leading-relaxed text-[#93370D]/80">
                                         Похоже, у приложения нет доступа к микрофону. После обновления системе иногда нужно разрешить его заново.
                                     </p>
                                     <button
                                         type="button"
                                         onClick={() => { import('@tauri-apps/api/core').then(({ invoke }) => invoke('open_microphone_settings').catch(() => {})); }}
-                                        className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400 underline underline-offset-2 hover:opacity-80"
+                                        className="mt-2 text-[12.5px] font-semibold text-[#93370D] underline underline-offset-2 hover:opacity-80"
                                     >
                                         Открыть настройки микрофона
                                     </button>
                                 </div>
                             )}
                         </>
+                    ) : emptyText ? (
+                        <p className="text-[13px] text-im-mut">{emptyText}</p>
                     ) : isMeetingView ? (
                         /* Открыта пустая встреча: не было записано ни одной реплики.
                            Понятный статус + возможность удалить, чтобы не копить мусор. */
-                        <div className="flex flex-col items-center px-6">
-                            <div className="w-14 h-14 mb-4 rounded-2xl bg-secondary flex items-center justify-center">
-                                <svg className="w-7 h-7 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" strokeLinejoin="round"/><path d="M14 3v5h5" strokeLinejoin="round"/></svg>
-                            </div>
-                            <h3 className="text-base font-semibold text-foreground mb-1.5">В этой встрече ничего не записано</h3>
-                            <p className="text-sm text-muted-foreground mb-5 max-w-xs leading-relaxed">
+                        <div className="flex flex-col items-center">
+                            <h3 className="mb-1.5 text-[15px] font-bold text-im-ink">В этой встрече ничего не записано</h3>
+                            <p className="mb-5 max-w-xs text-[13px] leading-[19px] text-im-mut">
                                 Похоже, запись была пустой или не получилась. Можно удалить встречу, чтобы не хранить лишнее.
                             </p>
                             {onDeleteMeeting && (
                                 <button
                                     type="button"
                                     onClick={onDeleteMeeting}
-                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-medium transition-colors hover:bg-red-100 active:scale-[0.98] dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
+                                    className="inline-flex h-9 items-center gap-2 rounded-[18px] bg-white px-4 text-[13.5px] font-semibold text-im-ink2 shadow-[inset_0_0_0_1px_var(--im-line2)] transition-colors hover:bg-im-hover"
                                 >
-                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                    <Trash2 className="h-4 w-4" />
                                     Удалить встречу
                                 </button>
                             )}
                         </div>
                     ) : (
-                        <>
-                            <p className="text-lg font-semibold">Добро пожаловать в Insapp-meet!</p>
-                            <p className="text-xs mt-1">Начни запись, чтобы увидеть расшифровку</p>
-                        </>
+                        <p className="text-[13px] text-im-mut">Начните запись, чтобы увидеть расшифровку</p>
                     )}
                 </motion.div>
             ) : useVirtualization ? (
@@ -571,12 +568,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             height: virtualizer.getTotalSize(),
                             width: "100%",
                             position: "relative",
+                            flex: 'none',
                         }}
                     >
                         {virtualizer.getVirtualItems().map((virtualRow) => {
                             const segment = segments[virtualRow.index];
-                            const isStreaming = streamingSegmentId === segment.id;
-
                             return (
                                 <div
                                     key={segment.id}
@@ -590,112 +586,41 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         transform: `translateY(${virtualRow.start}px)`,
                                     }}
                                 >
-                                    <TranscriptSegment
-                                        id={segment.id}
-                                        timestamp={segment.timestamp}
-                                        text={getDisplayText(segment)}
-                                        speaker={labelFor((segment as any).speaker)}
-                                        speakerColor={colorFor((segment as any).speaker)}
-                                        onRenameSpeaker={renameHandlerFor((segment as any).speaker)}
-                                        confidence={segment.confidence}
-                                        isStreaming={isStreaming}
-                                        showConfidence={showConfidence}
-                                    />
+                                    {renderRow(virtualRow.index)}
                                 </div>
                             );
                         })}
                     </div>
 
                     {/* Infinite scroll trigger and loading indicator */}
-                    {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
-                        <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
-                            {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-muted-foreground">
-                                    <div className="w-4 h-4 border-2 border-border border-t-gray-600 rounded-full animate-spin" />
-                                    <span className="text-sm">Loading more...</span>
-                                </div>
-                            ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-muted-foreground">
-                                    Showing {loadedCount} of {totalCount} segments
-                                </span>
-                            ) : null}
-                        </div>
-                    )}
+                    {loadMoreBlock}
 
                     {/* Listening indicator when recording */}
-                    {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-2 mt-4 text-muted-foreground"
-                        >
-                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                            <span className="text-sm">Listening...</span>
-                        </motion.div>
-                    )}
+                    {showListening && <div className="pt-3"><ListeningPill paused={isPaused} /></div>}
                 </>
             ) : (
                 // Simple rendering for small lists (better animations)
                 <>
-                    <div className="space-y-1">
-                        {segments.map((segment) => {
-                            const isStreaming = streamingSegmentId === segment.id;
-
-                            return (
-                                <motion.div
-                                    key={segment.id}
-                                    initial={{ opacity: 0, y: 5 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.15 }}
-                                >
-                                    <TranscriptSegment
-                                        id={segment.id}
-                                        timestamp={segment.timestamp}
-                                        text={getDisplayText(segment)}
-                                        speaker={labelFor((segment as any).speaker)}
-                                        speakerColor={colorFor((segment as any).speaker)}
-                                        onRenameSpeaker={renameHandlerFor((segment as any).speaker)}
-                                        confidence={segment.confidence}
-                                        isStreaming={isStreaming}
-                                        showConfidence={showConfidence}
-                                    />
-                                </motion.div>
-                            );
-                        })}
+                    <div className="flex-none">
+                        {segments.map((segment, index) => (
+                            <motion.div
+                                key={segment.id}
+                                initial={{ opacity: 0, y: 5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.15 }}
+                            >
+                                {renderRow(index)}
+                            </motion.div>
+                        ))}
                     </div>
 
                     {/* Infinite scroll trigger (for small lists that grow) */}
-                    {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
-                        <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
-                            {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-muted-foreground">
-                                    <div className="w-4 h-4 border-2 border-border border-t-gray-600 rounded-full animate-spin" />
-                                    <span className="text-sm">Loading more...</span>
-                                </div>
-                            ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-muted-foreground">
-                                    Showing {loadedCount} of {totalCount} segments
-                                </span>
-                            ) : null}
-                        </div>
-                    )}
+                    {loadMoreBlock}
 
                     {/* Listening indicator when recording */}
-                    {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-2 mt-4 text-muted-foreground"
-                        >
-                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                            <span className="text-sm">Listening...</span>
-                        </motion.div>
-                    )}
+                    {showListening && <div className="pt-3"><ListeningPill paused={isPaused} /></div>}
                 </>
             )}
-            </div>
         </div>
     );
 };

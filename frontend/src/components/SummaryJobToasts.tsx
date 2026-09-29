@@ -23,7 +23,7 @@ export function SummaryJobToasts() {
       const name = j.title ? `«${j.title}»` : 'встречи';
       const onThisMeeting =
         typeof window !== 'undefined' &&
-        window.location.pathname.startsWith('/meeting-details') &&
+        (window.location.pathname === '/' || window.location.pathname.startsWith('/meeting-details')) &&
         new URLSearchParams(window.location.search).get('id') === j.meeting_id;
 
       if (j.state === 'running') {
@@ -45,7 +45,7 @@ export function SummaryJobToasts() {
           duration: 8000,
           action: onThisMeeting
             ? undefined
-            : { label: 'Открыть', onClick: () => router.push(`/meeting-details?id=${j.meeting_id}`) },
+            : { label: 'Открыть', onClick: () => router.push(`/?id=${j.meeting_id}`) },
         });
         return;
       }

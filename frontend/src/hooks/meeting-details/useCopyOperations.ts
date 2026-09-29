@@ -4,6 +4,7 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { plural } from '@/lib/meetingFormat';
 
 interface UseCopyOperationsProps {
   meeting: any;
@@ -51,19 +52,21 @@ export function useCopyOperations({
       return allData.transcripts;
     } catch (error) {
       console.error('❌ Error fetching all transcripts:', error);
-      toast.error('Failed to fetch transcripts for copying');
+      toast.error('Не удалось получить расшифровку для копирования');
       return [];
     }
   }, []);
 
-  // Copy transcript to clipboard
-  const handleCopyTranscript = useCallback(async () => {
+  // Copy transcript to clipboard (labelFor - подписи участников: «Вы», «Анна Смирнова»)
+  const handleCopyTranscript = useCallback(async (labelFor?: (speaker?: string) => string | undefined) => {
+    // Кнопка могла передать событие клика вместо функции - подписи тогда не ставим.
+    const label = typeof labelFor === 'function' ? labelFor : undefined;
     // CHANGE: Fetch ALL transcripts from database, not from pagination state
     console.log('📊 Fetching all transcripts for copying...');
     const allTranscripts = await fetchAllTranscripts(meeting.id);
 
     if (!allTranscripts.length) {
-      const error_msg = 'No transcripts available to copy';
+      const error_msg = 'В этой встрече нет расшифровки';
       console.log(error_msg);
       toast.error(error_msg);
       return;
@@ -83,14 +86,18 @@ export function useCopyOperations({
       return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
     };
 
-    const header = `# Transcript of the Meeting: ${meeting.id} - ${meetingTitle ?? meeting.title}\n\n`;
-    const date = `## Date: ${new Date(meeting.created_at).toLocaleDateString()}\n\n`;
+    const header = `# Расшифровка встречи: ${meetingTitle ?? meeting.title}\n\n`;
+    const date = `## Дата: ${new Date(meeting.created_at).toLocaleDateString('ru-RU')}\n\n`;
     const fullTranscript = allTranscripts
-      .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}  `)
+      .map(t => {
+        const who = label ? label((t as any).speaker) : undefined;
+        return `${formatTime(t.audio_start_time, t.timestamp)} ${who ? `${who}: ` : ''}${t.text}  `;
+      })
       .join('\n');
 
     await navigator.clipboard.writeText(header + date + fullTranscript);
-    toast.success("Transcript copied to clipboard");
+    const n = allTranscripts.length;
+    toast.success('Расшифровка скопирована', { description: `${n} ${plural(n, 'реплика', 'реплики', 'реплик')}` });
 
     // Track copy analytics
     const wordCount = allTranscripts
@@ -152,7 +159,7 @@ export function useCopyOperations({
       // If still no summary content, show message
       if (!summaryMarkdown.trim()) {
         console.error('❌ No summary content available to copy');
-        toast.error('No summary content available to copy');
+        toast.error('Резюме пустое - копировать нечего');
         return;
       }
 
@@ -176,7 +183,7 @@ export function useCopyOperations({
       await navigator.clipboard.writeText(fullMarkdown);
 
       console.log('✅ Successfully copied to clipboard!');
-      toast.success("Summary copied to clipboard");
+      toast.success('Резюме скопировано');
 
       // Track copy analytics
       await Analytics.trackCopy('summary', {
@@ -185,7 +192,7 @@ export function useCopyOperations({
       });
     } catch (error) {
       console.error('❌ Failed to copy summary:', error);
-      toast.error("Failed to copy summary");
+      toast.error('Не удалось скопировать резюме');
     }
   }, [aiSummary, meetingTitle, meeting, blockNoteSummaryRef]);
 

@@ -13,7 +13,7 @@ const STORAGE_KEY = "insapp_upload_to_cloud";
  *
  * По умолчанию отмечено (ставим true при первом рендере если значение не задано).
  */
-export function UploadOptInToggle({ visible }: { visible: boolean }) {
+export function UploadOptInToggle({ visible, variant = 'switch' }: { visible: boolean; variant?: 'switch' | 'icon' }) {
   const [checked, setChecked] = useState<boolean>(true);
 
   // Загружаем состояние при маунте
@@ -36,6 +36,25 @@ export function UploadOptInToggle({ visible }: { visible: boolean }) {
   };
 
   if (!visible) return null;
+
+  // Плашка записи главного экрана: только облачко, нажатие переключает отправку в облако.
+  if (variant === 'icon') {
+    const title = checked
+      ? "Отправка на сервер включена - нажмите, чтобы оставить эту встречу только на компьютере"
+      : "Эта встреча останется только на компьютере - нажмите, чтобы отправить на сервер";
+    return (
+      <button
+        type="button"
+        onClick={handleToggle}
+        aria-pressed={checked}
+        aria-label={checked ? "Отправка на сервер включена" : "Отправка на сервер выключена"}
+        title={title}
+        className="grid h-6 w-6 flex-none place-items-center rounded-full text-im-mut transition-colors hover:text-im-ink2"
+      >
+        {checked ? <Cloud className="h-[17px] w-[17px]" /> : <CloudOff className="h-[17px] w-[17px]" />}
+      </button>
+    );
+  }
 
   return (
     <label

@@ -28,6 +28,38 @@ interface RecordingControlsProps {
     systemDevice: string | null;
   };
   meetingName?: string;
+  /** 'plate' - нижний ряд плашки записи главного экрана (круглая красная «Стоп» + «Пауза»). */
+  variant?: 'default' | 'plate';
+}
+
+/**
+ * Понятное описание ошибки старта записи (микрофон / системный звук / разрешения).
+ * Используется кнопкой старта здесь и плашкой «Начать запись» главного экрана.
+ */
+export function describeRecordingStartError(error: unknown): { title: string; message: string } {
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  if (errorMsg.includes('microphone') || errorMsg.includes('mic') || errorMsg.includes('input')) {
+    return {
+      title: 'Микрофон недоступен',
+      message: 'Не получается обратиться к микрофону. Проверь:\n• Микрофон подключён\n• У приложения есть разрешение на микрофон\n• Микрофон не занят другой программой'
+    };
+  }
+  if (errorMsg.includes('system audio') || errorMsg.includes('speaker') || errorMsg.includes('output')) {
+    return {
+      title: 'Системный звук недоступен',
+      message: 'Не получается захватить системный звук. Проверь:\n• Установлен виртуальный аудио-драйвер (например, BlackHole)\n• У приложения есть разрешение на запись экрана (macOS)\n• Системный звук настроен корректно'
+    };
+  }
+  if (errorMsg.includes('permission')) {
+    return {
+      title: 'Нужны разрешения',
+      message: 'Для записи нужны разрешения. Сделай:\n• Дай доступ к микрофону в Системных настройках\n• Дай доступ к записи экрана (для системного звука, macOS)\n• Перезапусти приложение после выдачи разрешений'
+    };
+  }
+  return {
+    title: 'Не удалось начать запись',
+    message: 'Запись не запустилась. Проверь настройки аудио-устройств и попробуй ещё раз.'
+  };
 }
 
 export const RecordingControls: React.FC<RecordingControlsProps> = ({
@@ -42,6 +74,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   isParentProcessing,
   selectedDevices,
   meetingName,
+  variant = 'default',
 }) => {
   // Use global recording state context for pause state (syncs with tray operations)
   const recordingState = useRecordingState();
@@ -113,30 +146,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       });
 
       // Parse error message to provide user-friendly feedback
-      const errorMsg = error instanceof Error ? error.message : String(error);
-
-      // Check for device-related errors
-      if (errorMsg.includes('microphone') || errorMsg.includes('mic') || errorMsg.includes('input')) {
-        setDeviceError({
-          title: 'Микрофон недоступен',
-          message: 'Не получается обратиться к микрофону. Проверь:\n• Микрофон подключён\n• У приложения есть разрешение на микрофон\n• Микрофон не занят другой программой'
-        });
-      } else if (errorMsg.includes('system audio') || errorMsg.includes('speaker') || errorMsg.includes('output')) {
-        setDeviceError({
-          title: 'Системный звук недоступен',
-          message: 'Не получается захватить системный звук. Проверь:\n• Установлен виртуальный аудио-драйвер (например, BlackHole)\n• У приложения есть разрешение на запись экрана (macOS)\n• Системный звук настроен корректно'
-        });
-      } else if (errorMsg.includes('permission')) {
-        setDeviceError({
-          title: 'Нужны разрешения',
-          message: 'Для записи нужны разрешения. Сделай:\n• Дай доступ к микрофону в Системных настройках\n• Дай доступ к записи экрана (для системного звука, macOS)\n• Перезапусти приложение после выдачи разрешений'
-        });
-      } else {
-        setDeviceError({
-          title: 'Не удалось начать запись',
-          message: 'Запись не запустилась. Проверь настройки аудио-устройств и попробуй ещё раз.'
-        });
-      }
+      setDeviceError(describeRecordingStartError(error));
     }
   }, [onRecordingStart, isStarting, isValidatingModel, selectedDevices, meetingName, isRecording]);
 
@@ -344,6 +354,53 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       });
     };
   }, [onRecordingStop, onTranscriptionError]);
+
+  // Плашка записи главного экрана: круглая красная «Стоп» с подписью + «Пауза» (на паузе - «▶»).
+  // Логика та же, что у обычных кнопок; «Стоп» открывает окно «Сохранить встречу» (onRequestStop).
+  if (variant === 'plate') {
+    if (!isRecording) return null;
+    const busy = isStopping || isPausing || isResuming;
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            Analytics.trackButtonClick('stop_recording', 'recording_controls');
+            if (onRequestStop) { onRequestStop(); return; }
+            handleStopRecording();
+          }}
+          disabled={busy}
+          aria-label="Остановить запись"
+          className="group flex h-12 flex-1 items-center gap-3 rounded-3xl text-left disabled:opacity-60"
+        >
+          <span className="grid h-12 w-12 flex-none place-items-center rounded-full bg-im-rec text-white shadow-[0_3px_8px_rgba(205,35,20,.35),inset_0_1px_0_rgba(255,255,255,.25)] transition-transform duration-200 group-hover:scale-[1.04] group-hover:bg-im-rec-h">
+            <Square className="h-[18px] w-[18px]" fill="currentColor" strokeWidth={0} />
+          </span>
+          <b className="text-[15.5px] font-bold text-im-ink">{isStopping ? 'Останавливаю…' : 'Стоп'}</b>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (isPaused) {
+              Analytics.trackButtonClick('resume_recording', 'recording_controls');
+              handleResumeRecording();
+            } else {
+              Analytics.trackButtonClick('pause_recording', 'recording_controls');
+              handlePauseRecording();
+            }
+          }}
+          disabled={busy}
+          title={isPaused ? 'Продолжить запись' : 'Поставить на паузу'}
+          aria-label={isPaused ? 'Продолжить запись' : 'Пауза'}
+          className={`inline-flex h-9 flex-none items-center justify-center gap-1.5 rounded-[18px] bg-white text-[13.5px] font-semibold text-im-ink2 shadow-[inset_0_0_0_1px_var(--im-line2)] transition-[background,border-radius] duration-200 hover:bg-im-hover active:rounded-xl disabled:opacity-50 ${
+            isPaused ? 'w-9' : 'pl-[11px] pr-[13px]'
+          }`}
+        >
+          {isPaused ? <Play className="h-4 w-4" /> : <><Pause className="h-4 w-4" /><span>{isPausing ? 'Пауза…' : 'Пауза'}</span></>}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <TooltipProvider>

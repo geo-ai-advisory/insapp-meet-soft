@@ -1,3 +1,5 @@
+// УСТАРЕЛО (29.09.2026): файл больше не подключён - главный экран теперь components/Unified/*
+// (см. design-2026-09-29/impl/CHANGES.md). Не править; удалить отдельной чисткой.
 import React from 'react';
 import { AlertTriangle, Mic, Speaker, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';

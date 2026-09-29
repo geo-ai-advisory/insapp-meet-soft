@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { User, LogOut, LogIn, Loader2, RefreshCw, DownloadCloud } from 'lucide-react';
+import { User, LogOut, LogIn, Loader2, RefreshCw, DownloadCloud, CircleHelp } from 'lucide-react';
 import { triggerUpdateCheck } from '@/components/UpdateChecker';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { VisuallyHidden } from '@/components/ui/visually-hidden';
+import { About } from '@/components/About';
 
 interface Identity {
   full_name: string;
@@ -19,10 +22,11 @@ interface Identity {
  * Реализовано без Radix DropdownMenu (Portal конфликтовал с overflow sidebar) -
  * простой absolute-поповер на useState.
  */
-export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
+export function UserProfileButton({ collapsed, variant }: { collapsed: boolean; variant?: 'avatar' }) {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
@@ -84,6 +88,68 @@ export function UserProfileButton({ collapsed }: { collapsed: boolean }) {
       setBusy(false);
     }
   };
+
+  // Главный экран INmeet: круг с инициалами в шапке боковой панели, меню раскрывается вниз.
+  if (variant === 'avatar') {
+    const item = 'flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[14px] text-im-ink transition-colors hover:bg-im-bg disabled:opacity-50';
+    return (
+      <div ref={rootRef} className="relative">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="ml-1 grid h-8 w-8 flex-none place-items-center rounded-full bg-im-acc text-[11.5px] font-bold text-white transition-transform hover:scale-[1.04]"
+          aria-label={registered ? `Профиль ${name}` : 'Профиль'}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title={registered ? name : 'Вход не выполнен'}
+        >
+          {initials}
+        </button>
+        {open && (
+          <div role="menu" className="absolute right-0 top-full z-50 mt-2 w-[248px] rounded-[18px] bg-white p-1.5 shadow-float">
+            <div className="px-3 pb-2 pt-1.5">
+              <div className="truncate text-[14px] font-semibold text-im-ink">{registered ? name : 'Вход не выполнен'}</div>
+              <div className="mt-0.5 text-[12px] text-im-mut">{registered ? 'Учётная запись Insapp' : 'Войди под своей учёткой'}</div>
+            </div>
+            <div className="mx-2 my-1 border-t border-im-line" />
+            {registered && (
+              <button role="menuitem" onClick={handleSync} disabled={busy} className={item}>
+                {busy ? <Loader2 className="h-[18px] w-[18px] animate-spin text-im-mut" /> : <RefreshCw className="h-[18px] w-[18px] text-im-mut" />}
+                Синхронизировать встречи
+              </button>
+            )}
+            <button role="menuitem" onClick={() => { setOpen(false); triggerUpdateCheck(); }} className={item}>
+              <DownloadCloud className="h-[18px] w-[18px] text-im-mut" />
+              Проверить обновления
+            </button>
+            <button role="menuitem" onClick={() => { setOpen(false); setAboutOpen(true); }} className={item}>
+              <CircleHelp className="h-[18px] w-[18px] text-im-mut" />
+              О приложении
+            </button>
+            <div className="mx-2 my-1 border-t border-im-line" />
+            {registered ? (
+              <button role="menuitem" onClick={handleLogout} disabled={busy} className={item}>
+                <LogOut className="h-[18px] w-[18px] text-im-mut" />
+                Выйти
+              </button>
+            ) : (
+              <button role="menuitem" onClick={handleLogin} className={item}>
+                <LogIn className="h-[18px] w-[18px] text-im-mut" />
+                Войти
+              </button>
+            )}
+          </div>
+        )}
+        <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
+          <DialogContent>
+            <VisuallyHidden>
+              <DialogTitle>О приложении INmeet</DialogTitle>
+            </VisuallyHidden>
+            <About />
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className={collapsed ? 'relative' : 'relative w-full'}>

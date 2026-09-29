@@ -1,4 +1,6 @@
 "use client";
+// УСТАРЕЛО (29.09.2026): файл больше не подключён - главный экран теперь components/Unified/*
+// (см. design-2026-09-29/impl/CHANGES.md). Не править; удалить отдельной чисткой.
 
 import { useEffect, useState } from "react";
 import { Sparkles, Cloud, CloudOff, CloudUpload, Loader2 } from "lucide-react";

@@ -1,9 +1,8 @@
 'use client';
+// УСТАРЕЛО (29.09.2026): файл больше не подключён - главный экран теперь components/Unified/*
+// (см. design-2026-09-29/impl/CHANGES.md). Не править; удалить отдельной чисткой.
 
-import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { Mic, Speaker, RefreshCw, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -12,111 +11,17 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { useConfig } from '@/contexts/ConfigContext';
-
-interface AudioDevice {
-  name: string;
-  device_type: 'Input' | 'Output';
-}
-
-/** Убирает суффикс " (input)"/" (output)" - backend reconnect ждёт чистое имя. */
-function cleanDeviceName(value: string): string {
-  return value.replace(/\s*\((input|output)\)\s*$/i, '');
-}
+import { useRecordingDevices } from '@/hooks/useRecordingDevices';
 
 /**
- * Компактная панель выбора аудио-устройств над кнопкой записи.
- *
- * Показывается ВСЕГДА - и до старта записи, и во время неё:
- *  - до старта: выбор просто сохраняется и применяется при старте;
- *  - во время записи: смена устройства применяется на лету (через
- *    attempt_device_reconnect - останавливает старый поток и запускает новый,
- *    не прерывая запись). Нужно если, например, наушники отвалились.
- *
- * Системный звук включён по умолчанию (тумблер ON → systemDevice "__default__").
+ * Компактная панель выбора аудио-устройств (старый нижний док записи).
+ * Вся логика - в хуке useRecordingDevices (им же пользуется плашка записи главного экрана).
  */
 export function RecordingDeviceBar({ isRecording = false }: { isRecording?: boolean }) {
-  const { selectedDevices, setSelectedDevices } = useConfig();
-  const [devices, setDevices] = useState<AudioDevice[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [switching, setSwitching] = useState<null | 'mic' | 'system'>(null);
-
-  const inputDevices = devices.filter((d) => d.device_type === 'Input');
-
-  const fetchDevices = async () => {
-    try {
-      const result = await invoke<AudioDevice[]>('get_audio_devices');
-      setDevices(result);
-    } catch (err) {
-      console.error('Не удалось получить список аудио-устройств:', err);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDevices();
-  }, []);
-
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchDevices();
-  };
-
-  const micValue = selectedDevices.micDevice || 'default';
-
-  // Применить смену устройства на лету (только во время записи).
-  const applyLiveSwitch = async (deviceValue: string, kind: 'Microphone' | 'SystemAudio') => {
-    if (!isRecording || deviceValue === 'default') return;
-    const name = cleanDeviceName(deviceValue);
-    setSwitching(kind === 'Microphone' ? 'mic' : 'system');
-    try {
-      const ok = await invoke<boolean>('attempt_device_reconnect', {
-        deviceName: name,
-        deviceType: kind,
-      });
-      if (ok) {
-        toast.success(
-          kind === 'Microphone' ? `Микрофон переключён: ${name}` : `Системный звук: ${name}`,
-        );
-      } else {
-        toast.error(`Не удалось переключиться на «${name}» - устройство недоступно`);
-      }
-    } catch (e) {
-      toast.error(`Ошибка переключения: ${typeof e === 'string' ? e : 'устройство недоступно'}`);
-    } finally {
-      setSwitching(null);
-    }
-  };
-
-  const handleMicChange = (value: string) => {
-    console.log(`[insapp-meet] rec: смена устройства (микрофон) -> ${value === 'default' ? 'по умолчанию' : cleanDeviceName(value)}`);
-    setSelectedDevices({
-      ...selectedDevices,
-      micDevice: value === 'default' ? null : value,
-    });
-    applyLiveSwitch(value, 'Microphone');
-  };
-
-  const systemOn =
-    !!selectedDevices.systemDevice && selectedDevices.systemDevice !== '__none__';
-
-  const handleSystemToggle = (on: boolean) => {
-    console.log(`[insapp-meet] rec: системный звук ${on ? 'вкл' : 'выкл'}`);
-    setSelectedDevices({
-      ...selectedDevices,
-      systemDevice: on ? '__default__' : null,
-    });
-    // Во время записи мгновенное вкл/выкл системного звука пока не делаем
-    // (требует остановки/старта system-потока) - применится со следующей записи.
-    if (isRecording) {
-      toast.info(
-        on
-          ? 'Системный звук включится при следующей записи'
-          : 'Системный звук выключится при следующей записи',
-      );
-    }
-  };
+  const {
+    inputDevices, micValue, changeMic: handleMicChange, systemOn, toggleSystem: handleSystemToggle,
+    refresh: handleRefresh, refreshing, switching,
+  } = useRecordingDevices(isRecording);
 
   return (
     <div className="flex items-center gap-3">

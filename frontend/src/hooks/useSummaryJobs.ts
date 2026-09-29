@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { toast } from 'sonner';
 
 /** Событие фонового резюме (бэкенд шлёт `summary-job`). */
 export interface SummaryJobEvent {
@@ -103,6 +104,70 @@ export function useSummaryReadiness() {
   }, []);
 
   return { readiness, refresh, setAuto };
+}
+
+/**
+ * Галочка «Авто-резюме после встречи»: состояние, подсказка и действие.
+ *
+ * Включается только когда подключён Claude: выбран в настройках AI-резюме,
+ * установлен на компьютере и выполнен вход в аккаунт. Иначе - подсказка, что сделать,
+ * и действие («Войти в Claude» / «Настройки»). Если галочка уже включена, а вход в Claude
+ * слетел - предупреждение: резюме не создадутся, пока не войдёшь.
+ * (Логика перенесена без изменений из AutoSummaryToggle старой главной.)
+ */
+export function useAutoSummaryState(onOpenSettings: () => void) {
+  const { readiness, setAuto } = useSummaryReadiness();
+  const [saving, setSaving] = useState(false);
+
+  const checking = readiness === null;
+  const on = !!readiness?.auto_summary;
+  const ready = !!readiness?.claude_ready;
+
+  let hint = '';
+  let warn = false;
+  let action: { label: string; run: () => void } | null = null;
+  if (checking) {
+    hint = 'Проверяю подключение Claude...';
+  } else if (readiness!.provider !== 'claude') {
+    hint = 'Работает только с Claude - выбери его в настройках AI-резюме';
+    action = { label: 'Настройки', run: onOpenSettings };
+  } else if (!readiness!.cli_path) {
+    hint = 'Claude не найден на этом компьютере - проверь настройки AI-резюме';
+    action = { label: 'Настройки', run: onOpenSettings };
+  } else if (!ready) {
+    hint = on
+      ? 'Включено, но вход в Claude истёк - резюме не создадутся, пока не войдёшь'
+      : 'Нужно войти в свой аккаунт Claude';
+    warn = on;
+    action = { label: 'Войти в Claude', run: () => openClaudeLogin() };
+  } else {
+    hint = on
+      ? 'Claude Sonnet напишет резюме в фоне сразу после окончания встречи'
+      : 'Резюме будет появляться само после каждой встречи - Claude Sonnet, в фоне';
+  }
+
+  // Включить можно только при готовом Claude; выключить - всегда.
+  const canToggle = !checking && !saving && (on || ready);
+
+  const toggle = useCallback(async () => {
+    if (!canToggle) {
+      if (action) action.run();
+      return;
+    }
+    setSaving(true);
+    try {
+      const r = await setAuto(!on);
+      toast.success(r.auto_summary ? 'Авто-резюме включено' : 'Авто-резюме выключено', {
+        description: r.auto_summary ? 'После каждой встречи Claude Sonnet сделает резюме в фоне' : undefined,
+      });
+    } catch (e) {
+      toast.error('Не удалось сохранить', { description: String(e) });
+    } finally {
+      setSaving(false);
+    }
+  }, [canToggle, action, setAuto, on]);
+
+  return { checking, on, ready, hint, warn, action, canToggle, saving, toggle, model: readiness?.model };
 }
 
 /** Открыть окно входа в Claude (оно подключено в корне приложения). */

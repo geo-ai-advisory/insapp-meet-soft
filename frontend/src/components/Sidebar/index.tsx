@@ -1,4 +1,6 @@
 'use client';
+// УСТАРЕЛО (29.09.2026): файл больше не подключён - главный экран теперь components/Unified/*
+// (см. design-2026-09-29/impl/CHANGES.md). Не править; удалить отдельной чисткой.
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Settings, PanelLeftClose, PanelLeftOpen, House, Trash2, Mic, Square, Plus, Search as SearchIcon, Pencil, BookOpenText, X, FileUp, Mic2, Youtube, Moon, Sun } from 'lucide-react';

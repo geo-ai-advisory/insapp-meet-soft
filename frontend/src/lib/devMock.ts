@@ -3,61 +3,170 @@
  *
  * Только для `npm run dev` в обычном браузере (без Tauri). Подменяет
  * window.__TAURI_INTERNALS__ так, чтобы invoke() возвращал реалистичные демо-данные
- * (встречи, транскрипт, профиль, устройства), а listen()/event не падали. Это позволяет
- * довести вёрстку ВСЕХ экранов 1:1 с макетом прямо в браузере. В собранном приложении
- * настоящий __TAURI_INTERNALS__ уже есть -> мок не ставится.
+ * (встречи, расшифровки, резюме, профиль, устройства, запись), а listen()/event работали.
+ * В собранном приложении настоящий __TAURI_INTERNALS__ уже есть -> мок не ставится.
+ *
+ * Демо-данные совпадают с эталоном дизайна (round3/concepts/b-air): «Синк с продуктом» и т.д.
+ *
+ * Параметры адреса:
+ *   ?dev_screen=recording - запись уже идёт (с репликами из эталона);
+ *   ?dev_screen=save      - сразу окно «Сохранить встречу»;
+ *   ?dev_empty=1          - встреч нет (пустое состояние);
+ *   ?dev_claude=out|ready|nocli|codex - состояние входа в Claude; ?dev_fail=1 - резюме с ошибкой.
+ *
+ * В консоли браузера:
+ *   window.__devEmit(event, payload)          - прислать событие как движок;
+ *   window.__devLive.say('system_1', 'Текст') - реплика во время записи ('mic' - Вы);
+ *   window.__devLive.script()                 - проиграть разговор из эталона по репликам;
+ *   window.__devLive.recognize('system_1', 'Анна Смирнова') - «голоса коллег» узнали собеседника.
  */
 
-const DEMO_MEETINGS = [
-  { id: 'demo-1', title: 'Синк с продуктом', meeting_type: 'internal', minutesAgo: 60 * 22, duration: 42, preview: 'Обсудили запуск новой витрины МФО и распределение позиций. Решили вынести крупный оффер на последнюю строку.' },
-  { id: 'demo-2', title: 'Разбор воронки МФО', meeting_type: 'internal', minutesAgo: 60 * 30, duration: 65, preview: 'Прошлись по падению переходов на прошлой неделе. Гипотеза - сломался один из ключей выдачи.' },
-  { id: 'demo-3', title: 'Звонок с партнёром', meeting_type: 'external', minutesAgo: 60 * 24 * 5, duration: 28, preview: 'Партнёр прислал описание методов интеграции. Нужно свести их с нашим форматом витрины.' },
-  { id: 'demo-4', title: 'Ретро спринта', meeting_type: 'internal', minutesAgo: 60 * 24 * 7, duration: 51, preview: 'Команда довольна темпом, но просит раньше получать макеты. Решили добавить промежуточный показ.' },
-  { id: 'demo-5', title: '1-на-1 с дизайнером', meeting_type: 'internal', minutesAgo: 60 * 24 * 10, duration: 33, preview: 'Обсудили загрузку и приоритеты на месяц. Дизайнер берёт редизайн экрана записи.' },
+type Line = { at: number; sp: string; dur: number; text: string };
+
+// Разговор из эталона: Вы / Анна Смирнова / Дмитрий Орлов / Собеседник 3 (доли речи ~38/34/21/7 %).
+const DESIGN_LINES: Line[] = [
+  { at: 12, sp: 'mic', dur: 8, text: 'Так, все слышно? Отлично. Сегодня разбираем запуск новой витрины и порядок позиций МФО.' },
+  { at: 21, sp: 'system_1', dur: 12, text: 'Да, черновик витрины готов. Главный вопрос - куда ставить крупные офферы вроде ДеньгиСразу.' },
+  { at: 33, sp: 'mic', dur: 9, text: 'По прошлым данным крупный оффер на последней позиции даёт конверсию в разы выше, чем на первой.' },
+  { at: 45, sp: 'system_1', dur: 11, text: 'Тогда фиксируем его на последней строке и не трогаем в А/Б, чтобы не смазать эффект.' },
+  { at: 56, sp: 'system_2', dur: 11, text: 'Я возьму выгрузку из дашборда: переходы и выдачи по каждому ключу.' },
+  { at: 64, sp: 'system_2', dur: 10, text: 'Если где-то просадка - сразу подсвечу в чате.' },
+  { at: 71, sp: 'mic', dur: 7, text: 'Отлично. Сводка по конверсии за две недели нужна до пятницы.' },
+  { at: 80, sp: 'system_1', dur: 11, text: 'Успеем. Раскладку витрины пришлю к среде.' },
+  { at: 88, sp: 'mic', dur: 8, text: 'И ещё момент по партнёру: после сводки согласуем с ними дату запуска.' },
+  { at: 97, sp: 'system_3', dur: 7, text: 'По партнёру есть вопрос про лимиты - обсудим отдельно?' },
+  { at: 104, sp: 'mic', dur: 6, text: 'Да, давай завтра в одиннадцать.' },
 ];
 
-const DEMO_TRANSCRIPT = [
-  { id: 1, timestamp: '00:00', speaker: 'Geo', text: 'Так, все слышно? Отлично. Сегодня хочу разобрать запуск новой витрины и как мы расставляем позиции МФО.' },
-  { id: 2, timestamp: '00:14', speaker: 'Анна', text: 'Да, по витрине у меня готов черновик. Главный вопрос - куда ставить крупные офферы вроде ДеньгиСразу.' },
-  { id: 3, timestamp: '00:31', speaker: 'Geo', text: 'По прошлым данным крупный оффер на последней позиции даёт конверсию в разы выше, чем на первой. Это контринтуитивно, но цифры устойчивые.' },
-  { id: 4, timestamp: '00:52', speaker: 'Анна', text: 'Тогда предлагаю зафиксировать его именно на последней строке и не трогать в А/Б, чтобы не смазать эффект.' },
-  { id: 5, timestamp: '01:10', speaker: 'Geo', text: 'Согласен. Давай так и сделаем. И нужно собрать сводку по конверсии за две недели до пятницы.' },
-  { id: 6, timestamp: '01:28', speaker: 'Дмитрий', text: 'Я возьму выгрузку из дашборда. Сверю переходы и выдачи по каждому ключу, если где-то просадка - сразу подсвечу.' },
+const GENERIC_LINES: Line[] = [
+  { at: 5, sp: 'mic', dur: 9, text: 'Давайте начнём: что изменилось с прошлой недели?' },
+  { at: 16, sp: 'system_1', dur: 14, text: 'Цифры по воронке выровнялись, но на втором шаге всё ещё теряем заметную долю пользователей.' },
+  { at: 32, sp: 'mic', dur: 10, text: 'Понял. Предлагаю посмотреть, где именно отваливаются, и собрать гипотезы.' },
+  { at: 44, sp: 'system_1', dur: 12, text: 'Соберу срез по источникам трафика к четвергу и пришлю в чат.' },
+  { at: 58, sp: 'mic', dur: 6, text: 'Отлично, тогда на этом всё.' },
 ];
 
-const DEMO_SUMMARY_MD = [
-  '🗓 **Синк с продуктом: запуск новой витрины МФО**',
+const SUMMARY_SINK = [
+  '🗓 Синк с продуктом: запуск новой витрины МФО',
   '28.09.2026 · 42 мин · Geo, Анна Смирнова (продукт), Дмитрий Орлов (аналитика)',
-  '',
   'Разобрали черновик новой витрины и порядок позиций. Договорились зафиксировать крупный оффер внизу и собрать сводку по конверсии.',
   '',
   '## 🎯 Итог',
-  '- **Крупный оффер - на последнюю позицию.** По данным прошлых запусков там конверсия в разы выше, чем на первой строке.',
-  '- **В А/Б-тесте позицию не трогаем**, чтобы не смазать эффект.',
+  '- Крупный оффер - на последнюю позицию. По данным прошлых запусков там конверсия в разы выше, чем на первой строке.',
+  '- В А/Б-тесте позицию не трогаем, чтобы не смазать эффект.',
   '- Черновик витрины у Анны готов, правок по структуре нет.',
-  '',
-  '## ✅ Задачи',
-  '- **Дмитрий:** выгрузка переходов и выдач по каждому ключу из дашборда - до пятницы.',
-  '- **Анна:** финальная раскладка витрины с крупным оффером внизу - к среде.',
-  '- **Geo:** согласовать запуск с партнёром после сводки.',
-  '',
-  '## ⏱ Сроки',
-  '- Сводка по конверсии за 2 недели - **пятница, 2 октября**.',
-  '- Запуск витрины - после согласования сводки.',
 ].join('\n');
 
-function isoMinutesAgo(min: number): string {
-  return new Date(Date.now() - min * 60 * 1000).toISOString();
+const SUMMARY_PARTNER = [
+  '🗓 Звонок с партнёром: интеграция витрины',
+  '25.09.2026 · 28 мин · Geo (Insapp) · Олег Петров (партнёр)',
+  'Партнёр прислал описание методов интеграции - сверили с нашим форматом витрины.',
+  '',
+  '## 🎯 Итог',
+  '- **Интеграция через API партнёра** - их методы подходят, доработка на нашей стороне небольшая.',
+  '- Тестовый стенд партнёр откроет до конца недели.',
+  '',
+  '## ✅ Действия',
+  'Insapp:',
+  '• Geo: согласовать формат выдачи офферов - до среды',
+  '• Дмитрий: подготовить тестовые ключи',
+  'Партнёр:',
+  '• Олег: открыть тестовый стенд и прислать доступы',
+  '',
+  '## 📅 Сроки',
+  '1. Тестовый стенд - **пятница, 2 октября**.',
+  '2. Запуск - после проверки на стенде.',
+].join('\n');
+
+function genericSummary(title: string): string {
+  return [
+    `🗓 ${title}`,
+    'Разобрали текущие цифры и договорились о следующих шагах.',
+    '',
+    '## 🎯 Итог',
+    '- Воронка выровнялась, но на втором шаге остаются потери.',
+    '- Срез по источникам трафика будет к четвергу.',
+  ].join('\n');
 }
 
-// --- dev: фоновые резюме и события ---
-let devAuto = false;
+interface DemoMeeting {
+  id: string;
+  title: string;
+  meeting_type: 'internal' | 'external';
+  created: number; // ms
+  duration: number; // мин
+  preview: string;
+  lines: Line[];
+  names: Record<string, string>;
+  transcript_synced: boolean;
+  summary: string | null;
+  summary_synced: boolean;
+  summary_at: number | null;
+  folder: string;
+}
+
+function dayAt(daysBack: number, h: number, m: number): number {
+  const d = new Date();
+  d.setDate(d.getDate() - daysBack);
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+
+function buildDemo(): DemoMeeting[] {
+  const now = new Date();
+  // «Сегодня, 11:30», если утро уже прошло, иначе - час назад.
+  const today = now.getHours() * 60 + now.getMinutes() > 12 * 60 + 20 ? dayAt(0, 11, 30) : Date.now() - 60 * 60 * 1000;
+  const mk = (id: string, title: string, created: number, duration: number, opts: Partial<DemoMeeting>): DemoMeeting => ({
+    id, title, created, duration, meeting_type: 'internal', preview: '', lines: GENERIC_LINES,
+    names: { system_1: 'Анна Смирнова' }, transcript_synced: false, summary: null, summary_synced: false,
+    summary_at: null, folder: '/Users/geo/Movies/insapp-recordings/' + id, ...opts,
+  });
+  return [
+    mk('demo-1', 'Синк с продуктом', today, 42, {
+      lines: DESIGN_LINES, names: { system_1: 'Анна Смирнова', system_2: 'Дмитрий Орлов' },
+      transcript_synced: true, summary: SUMMARY_SINK, summary_synced: true, summary_at: today + 44 * 60 * 1000,
+      preview: 'Разобрали черновик новой витрины и порядок позиций.',
+    }),
+    mk('demo-2', 'Разбор воронки МФО', dayAt(1, 16, 5), 65, { preview: 'Прошлись по падению переходов на прошлой неделе.' }),
+    mk('demo-3', 'Звонок с партнёром', dayAt(4, 14, 0), 28, {
+      meeting_type: 'external', names: { system_1: 'Олег Петров' }, transcript_synced: true,
+      summary: SUMMARY_PARTNER, summary_synced: false, summary_at: dayAt(4, 14, 35),
+    }),
+    mk('demo-4', 'Ретро спринта', dayAt(6, 12, 0), 51, {}),
+    mk('demo-5', '1-на-1 с дизайнером', dayAt(10, 15, 0), 33, { summary: genericSummary('1-на-1 с дизайнером'), summary_synced: true, summary_at: dayAt(10, 15, 40) }),
+    mk('demo-6', 'Собеседование: продакт-аналитик', dayAt(12, 11, 0), 45, { transcript_synced: true, summary: genericSummary('Собеседование: продакт-аналитик'), summary_synced: true, summary_at: dayAt(12, 11, 50) }),
+    mk('demo-7', 'Созвон с банком по интеграции', dayAt(13, 10, 0), 72, { transcript_synced: true, summary: genericSummary('Созвон с банком по интеграции'), summary_synced: true, summary_at: dayAt(13, 11, 15) }),
+  ];
+}
+
+function linesToTranscripts(id: string, lines: Line[]) {
+  return lines.map((l, i) => ({
+    id: `${id}-t${i + 1}`,
+    text: l.text,
+    timestamp: `00:${String(Math.floor(l.at / 60)).padStart(2, '0')}:${String(l.at % 60).padStart(2, '0')}`,
+    audio_start_time: l.at,
+    audio_end_time: l.at + l.dur,
+    duration: l.dur,
+    speaker: l.sp,
+    confidence: 0.93,
+  }));
+}
+
+// --- dev: состояние ---
+let devAuto = true;
 const devJobs: Record<string, number> = {};
-const devSummaries: Record<string, boolean> = { 'demo-1': true };
+let demo: DemoMeeting[] = [];
+const savedTranscripts: Record<string, any[]> = {};
 const devListeners: { event: string; handler: number; eventId: number }[] = [];
+const devRec = { on: false, paused: false, startMs: 0, pauseStartMs: 0, pausedMs: 0, title: '', seq: 0, lastEnd: 0 };
+let recCounter = 0;
+
+function qs(name: string): string | null {
+  return typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get(name) : null;
+}
 
 function devSummaryReadiness() {
-  const mode = new URLSearchParams(window.location.search).get('dev_claude') || 'ready';
+  const mode = qs('dev_claude') || 'ready';
   const provider = mode === 'codex' ? 'codex' : 'claude';
   const cli_path = mode === 'nocli' ? null : '/Users/geo/.local/bin/claude';
   const logged_in = provider !== 'claude' || !cli_path ? null : mode === 'out' ? false : true;
@@ -71,7 +180,7 @@ function devSummaryReadiness() {
   };
 }
 
-/** Прислать событие так, как его прислал бы движок (для проверки всплывашек в браузере). */
+/** Прислать событие так, как его прислал бы движок (для проверки в браузере). */
 function devEmit(event: string, payload: any) {
   devListeners
     .filter((l) => l.event === event)
@@ -81,42 +190,252 @@ function devEmit(event: string, payload: any) {
     });
 }
 
+function recElapsed(): { total: number; active: number } {
+  if (!devRec.on) return { total: 0, active: 0 };
+  const now = Date.now();
+  const total = (now - devRec.startMs) / 1000;
+  const pausedNow = devRec.paused ? now - devRec.pauseStartMs : 0;
+  return { total, active: Math.max(0, (now - devRec.startMs - devRec.pausedMs - pausedNow) / 1000) };
+}
+
+function findMeeting(id?: string): DemoMeeting | undefined {
+  return demo.find((m) => m.id === id);
+}
+
+function meetingTranscripts(m: DemoMeeting) {
+  return savedTranscripts[m.id] || linesToTranscripts(m.id, m.lines);
+}
+
+/** Реплика во время записи - как transcript-update от движка. */
+function devSay(speaker: string, text: string, dur = 6) {
+  if (!devRec.on) {
+    console.warn('[dev] запись не идёт - нажмите «Начать запись»');
+    return;
+  }
+  devRec.seq += 1;
+  const at = recElapsed().active;
+  // Реплики идут одна за другой: начало - не раньше конца предыдущей.
+  const start = Math.max(devRec.lastEnd, at - dur, 0);
+  devRec.lastEnd = start + dur;
+  devEmit('transcript-update', {
+    text,
+    timestamp: new Date().toTimeString().slice(0, 8),
+    source: speaker === 'mic' ? 'mic' : 'system',
+    sequence_id: devRec.seq,
+    chunk_start_time: start,
+    is_partial: false,
+    confidence: 0.94,
+    audio_start_time: start,
+    audio_end_time: start + dur,
+    duration: dur,
+    speaker,
+  });
+}
+
+function startJob(id: string, source: 'manual' | 'auto', ms = 6000) {
+  const m = findMeeting(id);
+  const started_ms = Date.now();
+  devJobs[id] = started_ms;
+  const ev = (state: string, extra: any = {}) =>
+    devEmit('summary-job', { meeting_id: id, title: m?.title || 'Встреча', state, source, started_ms, error: null, auth_error: false, ...extra });
+  ev('running');
+  const failing = qs('dev_fail') === '1';
+  setTimeout(() => {
+    delete devJobs[id];
+    if (failing) { ev('error', { error: 'Claude вернул пустой ответ' }); return; }
+    const mm = findMeeting(id);
+    if (mm) {
+      mm.summary = id === 'demo-1' ? SUMMARY_SINK : genericSummary(mm.title);
+      mm.summary_at = Date.now();
+      mm.summary_synced = true;
+    }
+    ev('done');
+    devEmit('ai-summary-saved', id);
+  }, ms);
+}
+
 export function installDevTauriMock() {
   if (typeof window === 'undefined') return;
   if ((window as any).__TAURI_INTERNALS__) return; // настоящий Tauri - не трогаем
   if (process.env.NODE_ENV !== 'development') return;
 
-  const meetingsApi = DEMO_MEETINGS.map((m) => ({
-    id: m.id,
-    title: m.title,
-    created_at: isoMinutesAgo(m.minutesAgo),
-    meeting_type: m.meeting_type,
-    duration: m.duration,
-    preview: m.preview,
-  }));
+  demo = qs('dev_empty') === '1' ? [] : buildDemo();
+  // «Ретро спринта» - резюме готовится (статус-волна в списке).
+  if (findMeeting('demo-4')) devJobs['demo-4'] = Date.now() - 65 * 1000;
+  // ?dev_screen=recording - запись уже идёт, реплики из эталона уже распознаны.
+  if (qs('dev_screen') === 'recording') {
+    devRec.on = true;
+    devRec.startMs = Date.now() - (32 * 60 + 14) * 1000;
+    devRec.title = 'Синк с продуктом';
+    devRec.seq = DESIGN_LINES.length;
+  }
 
   const handlers: Record<string, (args?: any) => any> = {
     get_onboarding_status: () => ({ completed: true }),
     insapp_get_identity: () => ({ full_name: 'Geo M', is_registered: true }),
-    insapp_get_status: () => ({ settings: { server_url: 'https://meet.insapp.pro' }, connected: true, latency_ms: 28 }),
-    api_get_meetings: () => meetingsApi.map((m, i) => ({
-      ...m,
-      has_transcript: true,
-      transcript_synced: true,
-      has_summary: !!devSummaries[m.id] || i === 0,
-      summary_synced: i === 0,
+    insapp_get_status: () => ({
+      settings: { server_url: 'https://meet.insapp.pro', auto_upload: true },
+      api_key_preview: 'ab12…cd34', key_source: 'file', queue_size: 0, server_reachable: true,
+      full_name: 'Geo M', is_registered: true,
+    }),
+    api_get_meetings: () => demo.map((m) => ({
+      id: m.id,
+      title: m.title,
+      created_at: new Date(m.created).toISOString(),
+      meeting_type: m.meeting_type,
+      duration: m.duration,
+      preview: m.preview,
+      has_transcript: m.lines.length > 0 || !!savedTranscripts[m.id]?.length,
+      transcript_synced: m.transcript_synced,
+      has_summary: !!m.summary,
+      summary_synced: !!m.summary && m.summary_synced,
     })),
+    api_get_meeting: (args: any) => {
+      const m = findMeeting(args?.meetingId);
+      if (!m) throw 'Meeting not found';
+      return { id: m.id, title: m.title, meeting_type: m.meeting_type, created_at: new Date(m.created).toISOString(), transcripts: meetingTranscripts(m) };
+    },
+    api_get_meeting_metadata: (args: any) => {
+      const m = findMeeting(args?.meetingId);
+      if (!m) throw 'Meeting not found';
+      return {
+        id: m.id,
+        title: m.title,
+        created_at: new Date(m.created).toISOString(),
+        updated_at: new Date(m.created + 5 * 60000).toISOString(),
+        folder_path: m.folder,
+        meeting_type: m.meeting_type,
+        duration: m.duration,
+      };
+    },
+    api_get_meeting_transcripts: (args: any) => {
+      const m = findMeeting(args?.meetingId);
+      const all = m ? meetingTranscripts(m) : [];
+      const offset = Number(args?.offset || 0);
+      const limit = Number(args?.limit || 100);
+      const page = all.slice(offset, offset + limit);
+      return { transcripts: page, has_more: offset + page.length < all.length, total_count: all.length };
+    },
+    api_get_transcripts: () => [],
+    get_meeting_transcripts: () => [],
+    api_get_summary: (args: any) => {
+      const m = findMeeting(args?.meetingId);
+      if (!m || !m.summary) return { status: 'idle', data: null, meeting_id: args?.meetingId };
+      return {
+        status: 'completed',
+        meeting_id: m.id,
+        meeting_name: m.title,
+        data: {
+          markdown: m.summary,
+          format: 'markdown',
+          source: 'ai_terminal',
+          sync_status: m.summary_synced ? 'sent' : 'pending',
+          synced_at: m.summary_at ? new Date(m.summary_at).toISOString() : undefined,
+        },
+      };
+    },
+    api_save_meeting_summary: (args: any) => {
+      const m = findMeeting(args?.meetingId);
+      if (m && args?.summary?.markdown) { m.summary = args.summary.markdown; m.summary_synced = false; }
+      return null;
+    },
+    api_save_meeting_title: (args: any) => { const m = findMeeting(args?.meetingId); if (m) m.title = args.title; return null; },
+    api_set_meeting_type: (args: any) => { const m = findMeeting(args?.meetingId); if (m) m.meeting_type = args.meetingType; return null; },
+    get_meeting_type: () => 'internal',
+    api_delete_meeting: (args: any) => { demo = demo.filter((m) => m.id !== args?.meetingId); return null; },
+    api_get_speaker_names: (args: any) => ({ ...(findMeeting(args?.meetingId)?.names || {}) }),
+    api_set_speaker_name: (args: any) => {
+      const m = findMeeting(args?.meetingId);
+      if (m) {
+        if (args.displayName) m.names[args.speakerKey] = args.displayName;
+        else delete m.names[args.speakerKey];
+      }
+      return { ok: true };
+    },
+    api_search_transcripts: (args: any) => {
+      const q = String(args?.query || '').toLowerCase();
+      if (!q) return [];
+      const out: any[] = [];
+      for (const m of demo) {
+        const hit = meetingTranscripts(m).find((t: any) => t.text.toLowerCase().includes(q));
+        if (hit) out.push({ id: m.id, title: m.title, matchContext: hit.text, timestamp: hit.timestamp });
+      }
+      return out;
+    },
+    insapp_share_meeting: (args: any) => ({ url: `https://meet.insapp.pro/m/${args?.meetingId}` }),
+    insapp_upload_meeting_by_id: (args: any) => { const m = findMeeting(args?.meetingId); if (m) m.transcript_synced = true; return { status: 'sent' }; },
+    ai_summary_resend_to_server: (args: any) => { const m = findMeeting(args?.meetingId); if (m) m.summary_synced = true; return { sync_status: 'sent' }; },
+    insapp_sync_pending: () => ({ summaries_sent: 0, transcripts_sent: 0 }),
+    open_meeting_folder: (args: any) => { console.log('[dev] открыть папку встречи', args?.meetingId); return null; },
+    open_external_url: (args: any) => { console.log('[dev] открыть', args?.url); return null; },
+    open_system_settings: () => null,
+
     get_audio_devices: () => [
       { name: 'MacBook Pro - микрофон', device_type: 'Input' },
       { name: 'AirPods Pro', device_type: 'Input' },
       { name: 'Внешний USB-микрофон', device_type: 'Input' },
+      { name: 'MacBook Pro - динамики', device_type: 'Output' },
     ],
-    get_recording_state: () => {
-      const rec = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('dev_screen') === 'recording';
-      return { is_recording: rec, is_paused: false, active_duration: rec ? 137 : 0 };
+    attempt_device_reconnect: () => true,
+
+    // --- запись ---
+    parakeet_init: () => null,
+    parakeet_has_available_models: () => true,
+    parakeet_get_available_models: () => [],
+    start_recording_with_devices_and_meeting: (args: any) => {
+      devRec.on = true;
+      devRec.paused = false;
+      devRec.startMs = Date.now();
+      devRec.pausedMs = 0;
+      devRec.seq = 0;
+      devRec.lastEnd = 0;
+      devRec.title = args?.meeting_name || '';
+      setTimeout(() => devEmit('recording-started', null), 60);
+      return null;
     },
-    is_recording: () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('dev_screen') === 'recording',
-    is_recording_paused: () => false,
+    start_recording: () => { devRec.on = true; devRec.startMs = Date.now(); setTimeout(() => devEmit('recording-started', null), 60); return null; },
+    get_recording_state: () => {
+      const e = recElapsed();
+      return { is_recording: devRec.on, is_paused: devRec.paused, is_active: devRec.on && !devRec.paused, recording_duration: e.total, active_duration: e.active };
+    },
+    is_recording: () => devRec.on,
+    is_recording_paused: () => devRec.paused,
+    pause_recording: () => { if (devRec.on && !devRec.paused) { devRec.paused = true; devRec.pauseStartMs = Date.now(); devEmit('recording-paused', null); } return null; },
+    resume_recording: () => { if (devRec.on && devRec.paused) { devRec.pausedMs += Date.now() - devRec.pauseStartMs; devRec.paused = false; devEmit('recording-resumed', null); } return null; },
+    stop_recording: () => {
+      if (!devRec.on) throw 'No recording in progress';
+      devRec.on = false;
+      devRec.paused = false;
+      setTimeout(() => devEmit('recording-stopped', { message: 'ok', folder_path: '/Users/geo/Movies/insapp-recordings/live', meeting_name: devRec.title }), 30);
+      return null;
+    },
+    get_recording_meeting_name: () => devRec.title || null,
+    get_meeting_folder_path: () => '/Users/geo/Movies/insapp-recordings/live',
+    get_transcript_history: () => (qs('dev_screen') === 'recording' && devRec.on
+      ? DESIGN_LINES.map((l, i) => ({
+        id: `live-${i + 1}`, text: l.text, display_time: '', sequence_id: i + 1, confidence: 0.93,
+        audio_start_time: l.at, audio_end_time: l.at + l.dur, duration: l.dur, speaker: l.sp,
+      }))
+      : []),
+    get_transcription_status: () => ({ chunks_in_queue: 0, is_processing: false, last_activity_ms: 9000 }),
+    api_save_transcript: (args: any) => {
+      recCounter += 1;
+      const id = `demo-rec-${recCounter}`;
+      const transcripts = (args?.transcripts || []).map((t: any, i: number) => ({ ...t, id: `${id}-t${i + 1}` }));
+      const end = transcripts.reduce((a: number, t: any) => Math.max(a, t.audio_end_time || 0), 0);
+      savedTranscripts[id] = transcripts;
+      demo.unshift({
+        id, title: args?.meetingTitle || 'Встреча', meeting_type: 'internal', created: Date.now() - end * 1000,
+        duration: Math.max(1, Math.round(end / 60)), preview: '', lines: [], names: {},
+        transcript_synced: !args?.skipServerUpload, summary: null, summary_synced: false, summary_at: null,
+        folder: '/Users/geo/Movies/insapp-recordings/' + id,
+      });
+      // Авто-резюме после встречи (как движок): резюме пишется в фоне.
+      if (devAuto && devSummaryReadiness().claude_ready) setTimeout(() => startJob(id, 'auto', 8000), 400);
+      return { meeting_id: id, insapp_sync: args?.skipServerUpload ? 'disabled' : 'sent' };
+    },
+    send_audio_diagnostic: () => null,
+
     // Разрешения выданы - чтобы не показывалась карточка «нужен доступ» в dev-вёрстке.
     check_microphone_permission: () => 'authorized',
     check_system_audio_permission: () => 'authorized',
@@ -124,37 +443,7 @@ export function installDevTauriMock() {
     has_microphone_permission: () => true,
     has_system_audio_permission: () => true,
     api_get_transcript_config: () => ({ provider: 'parakeet', model: 'parakeet-tdt-0.6b-v3', apiKey: null }),
-    get_transcription_status: () => ({ chunks_in_queue: 0, is_processing: false, last_activity_ms: 0 }),
-    get_meeting: (args) => ({
-      id: args?.meetingId || 'demo-1',
-      title: 'Встреча 16 июня, 14:30',
-      meeting_type: 'internal',
-      created_at: isoMinutesAgo(60 * 22),
-      transcripts: DEMO_TRANSCRIPT,
-    }),
-    api_get_transcripts: () => DEMO_TRANSCRIPT,
-    get_meeting_transcripts: () => DEMO_TRANSCRIPT,
-    api_get_meeting_metadata: (args: any) => {
-      const m = DEMO_MEETINGS.find((x) => x.id === args?.meetingId) || DEMO_MEETINGS[0];
-      return {
-        id: m.id,
-        title: m.title,
-        created_at: isoMinutesAgo(m.minutesAgo),
-        updated_at: isoMinutesAgo(m.minutesAgo - 5),
-        folder_path: '/Users/geo/Movies/insapp-recordings/' + m.id,
-        meeting_type: m.meeting_type,
-        duration: m.duration,
-      };
-    },
-    api_get_meeting_transcripts: () => ({
-      transcripts: DEMO_TRANSCRIPT.map((t, i) => ({ ...t, audio_start_time: i * 15, audio_end_time: i * 15 + 12 })),
-      has_more: false,
-      total_count: DEMO_TRANSCRIPT.length,
-    }),
-    api_get_summary: (args: any) => devSummaries[args?.meetingId]
-      ? { status: 'completed', data: { markdown: DEMO_SUMMARY_MD } }
-      : { status: 'idle', summary: null },
-    get_meeting_type: () => 'internal',
+    api_get_model_config: () => ({ provider: 'claude', model: 'sonnet', whisperModel: '', apiKey: null, ollamaEndpoint: null }),
     api_get_api_key: () => null,
     get_recording_preferences: () => ({ save_folder: '/Users/geo/Movies/insapp-recordings', auto_save: true, file_format: 'mp4', format: 'mp4', preferred_mic_device: null, preferred_system_device: null, mic: null, system: null }),
     list_ignored_apps: () => [],
@@ -179,34 +468,22 @@ export function installDevTauriMock() {
     },
     ai_summary_batch_status: () => null,
     api_get_meetings_without_summary: () => ({
-      items: DEMO_MEETINGS.filter((m, i) => i > 0 && !devSummaries[m.id]).map((m) => ({ id: m.id, title: m.title, created_at: isoMinutesAgo(m.minutesAgo), duration: m.duration })),
+      items: demo.filter((m) => !m.summary).map((m) => ({ id: m.id, title: m.title, created_at: new Date(m.created).toISOString(), duration: m.duration })),
     }),
+    api_skip_summary_for_meetings: () => null,
     ai_summary_jobs: () => Object.entries(devJobs).map(([meeting_id, started_ms]) => ({ meeting_id, started_ms, source: 'manual' })),
     ai_summary_generate: (args: any) => {
       const r = devSummaryReadiness();
       if (r.logged_in === false) throw 'AUTH: Claude не авторизован - войди в свой аккаунт Claude';
       const id = args?.meetingId as string;
       if (devJobs[id]) throw 'Резюме этой встречи уже готовится';
-      const m = DEMO_MEETINGS.find((x) => x.id === id);
-      const started_ms = Date.now();
-      devJobs[id] = started_ms;
-      const ev = (state: string, extra: any = {}) =>
-        devEmit('summary-job', { meeting_id: id, title: m?.title || 'Встреча', state, source: 'manual', started_ms, error: null, auth_error: false, ...extra });
-      ev('running');
-      const failing = new URLSearchParams(window.location.search).get('dev_fail') === '1';
-      setTimeout(() => {
-        delete devJobs[id];
-        if (failing) { ev('error', { error: 'Claude вернул пустой ответ' }); return; }
-        devSummaries[id] = true;
-        ev('done');
-        devEmit('ai-summary-saved', id);
-      }, 6000);
+      startJob(id, 'manual');
       return null;
     },
   };
 
   const transparent = async (cmd: string, args?: any): Promise<any> => {
-    // События: listen/emit/unlisten - no-op (возвращаем валидные заглушки).
+    // События: listen/emit/unlisten.
     if (cmd.startsWith('plugin:event|')) {
       if (cmd === 'plugin:event|listen') {
         const eventId = Math.floor(Math.random() * 1e9);
@@ -217,13 +494,17 @@ export function installDevTauriMock() {
         const i = devListeners.findIndex((l) => l.eventId === args?.eventId);
         if (i >= 0) devListeners.splice(i, 1);
       }
+      if (cmd === 'plugin:event|emit') devEmit(args?.event, args?.payload);
       return null;
     }
     // Updater/process: в dev нет обновления (иначе лезут баннеры «Доступна новая версия»).
     if (cmd.startsWith('plugin:updater|') || cmd.startsWith('plugin:process|')) return null;
+    // Файлы (plugin fs) в браузере не пишем - «Скачать .md» там качает файл обычным способом.
+    if (cmd.startsWith('plugin:fs|')) throw 'plugin fs недоступен в браузере';
     const h = handlers[cmd];
     if (h) {
-      if (cmd.startsWith('ai_summary_')) return h(args); // ошибки резюме - как у движка (reject)
+      // Ошибки как у движка (reject): резюме, «встреча не найдена», стоп без записи.
+      if (cmd.startsWith('ai_summary_') || cmd.startsWith('api_get_meeting') || cmd === 'stop_recording') return h(args);
       try { return h(args); } catch { return null; }
     }
     // catch-all: пустой массив - безопасен для .map/.filter/.length у незамоканных команд
@@ -231,7 +512,21 @@ export function installDevTauriMock() {
     return [];
   };
 
+  (window as any).__INMEET_DEV_MOCK__ = true;
   (window as any).__devEmit = devEmit;
+  (window as any).__devLive = {
+    say: devSay,
+    recognize: (speaker: string, name: string) => devEmit('speakers-recognized', { items: [{ speaker, name }] }),
+    script: (stepMs = 1400) => {
+      DESIGN_LINES.forEach((l, i) => {
+        setTimeout(() => devSay(l.sp, l.text, l.dur), i * stepMs);
+      });
+      // «Голоса коллег»: Анну и Дмитрия узнали по голосу, третий собеседник - новый.
+      setTimeout(() => devEmit('speakers-recognized', { items: [{ speaker: 'system_1', name: 'Анна Смирнова' }] }), 2 * stepMs + 300);
+      setTimeout(() => devEmit('speakers-recognized', { items: [{ speaker: 'system_2', name: 'Дмитрий Орлов' }] }), 5 * stepMs + 300);
+    },
+    state: () => ({ ...devRec, ...recElapsed() }),
+  };
   // listen() в Tauri 2 при отписке зовёт этот объект - без него в консоли летят ошибки.
   (window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener: (_event: string, eventId: number) => {
@@ -251,6 +546,11 @@ export function installDevTauriMock() {
     metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
   };
 
+  // ?dev_screen=recording: «голоса коллег» уже узнали Анну и Дмитрия.
+  if (qs('dev_screen') === 'recording') {
+    setTimeout(() => devEmit('speakers-recognized', { items: [{ speaker: 'system_1', name: 'Анна Смирнова' }, { speaker: 'system_2', name: 'Дмитрий Орлов' }] }), 1200);
+  }
+
   // eslint-disable-next-line no-console
-  console.log('[insapp-meet] DEV: установлен мок движка с демо-данными (только браузер).');
+  console.log('[insapp-meet] DEV: установлен мок движка с демо-данными (только браузер). Запись: window.__devLive.say / script / recognize.');
 }
