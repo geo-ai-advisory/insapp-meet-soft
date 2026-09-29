@@ -364,6 +364,43 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
 
+  // Пересмотр разметки собеседников во время записи (раз в ~30 с): если два похожих
+  // голоса были слиты под одним номером, приложение присылает исправленные номера для
+  // уже показанных реплик. Реплика находится по началу в записи (мс). Имена, которые
+  // пользователь дал собеседникам, привязаны к номерам и остаются у тех же людей.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<{ changes: { key: number; speaker: string }[] }>('speakers-relabeled', (event) => {
+          const map = new Map<number, string>();
+          for (const c of event.payload?.changes || []) map.set(c.key, c.speaker);
+          if (map.size === 0) return;
+          setTranscripts((prev) => {
+            let changed = false;
+            const next = prev.map((t) => {
+              if (!t.speaker || !t.speaker.startsWith('system') || t.audio_start_time == null) return t;
+              const sp = map.get(Math.round(t.audio_start_time * 1000));
+              if (!sp || sp === t.speaker) return t;
+              changed = true;
+              return { ...t, speaker: sp };
+            });
+            return changed ? next : prev;
+          });
+        }),
+      )
+      .then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      })
+      .catch(() => { /* dev-браузер без движка */ });
+    return () => {
+      alive = false;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   // Sync transcript history and meeting name from backend on reload
   // This fixes the issue where reloading during active recording causes state desync
   useEffect(() => {

@@ -1157,7 +1157,7 @@ pub async fn api_save_transcript<R: Runtime>(
     }
 
     // Convert serde_json::Value to TranscriptSegment
-    let transcripts_to_save: Vec<TranscriptSegment> = transcripts
+    let mut transcripts_to_save: Vec<TranscriptSegment> = transcripts
         .into_iter()
         .map(serde_json::from_value)
         .collect::<Result<Vec<_>, _>>()
@@ -1165,6 +1165,50 @@ pub async fn api_save_transcript<R: Runtime>(
             log_error!("Failed to parse transcript segments: {}", e);
             format!("Invalid transcript data format: {}. Please check the data structure.", e)
         })?;
+
+    // Разметка собеседников после встречи: при остановке записи все реплики
+    // собеседников разложены по голосам заново (во время записи двух похожих людей
+    // могло слить под один номер). Применяем, только если итог относится именно к
+    // этой встрече - большинство реплик собеседников находится по времени начала.
+    if let Some(map) = crate::audio::diarization::take_final_relabel() {
+        let guests: Vec<usize> = transcripts_to_save
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.speaker.as_deref().map(|s| s.starts_with("system")).unwrap_or(false))
+            .map(|(i, _)| i)
+            .collect();
+        let found = guests
+            .iter()
+            .filter(|&&i| {
+                transcripts_to_save[i]
+                    .audio_start_time
+                    .map(|t| map.contains_key(&crate::audio::diarization::segment_key(t)))
+                    .unwrap_or(false)
+            })
+            .count();
+        if !guests.is_empty() && found * 2 >= guests.len() {
+            let mut changed = 0usize;
+            for &i in &guests {
+                let Some(t) = transcripts_to_save[i].audio_start_time else { continue };
+                if let Some(n) = map.get(&crate::audio::diarization::segment_key(t)) {
+                    let label = format!("system_{}", n);
+                    if transcripts_to_save[i].speaker.as_deref() != Some(label.as_str()) {
+                        transcripts_to_save[i].speaker = Some(label);
+                        changed += 1;
+                    }
+                }
+            }
+            log_info!(
+                "Разметка собеседников после встречи: реплик собеседников {}, найдено {}, переподписано {}",
+                guests.len(), found, changed
+            );
+        } else {
+            log_info!(
+                "Разметка после встречи не применена: найдено {} из {} реплик собеседников",
+                found, guests.len()
+            );
+        }
+    }
 
     // Log parsed segments count and first segment details
     if let Some(first_seg) = transcripts_to_save.first() {

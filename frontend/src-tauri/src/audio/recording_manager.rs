@@ -439,6 +439,11 @@ impl RecordingManager {
         self.recording_saver.add_transcript_segment(segment);
     }
 
+    /// Переподписать собеседников после пересмотра разметки (см. diarization::relabel_live).
+    pub fn relabel_speakers(&self, changes: &std::collections::HashMap<i64, usize>) {
+        self.recording_saver.relabel_speakers(changes);
+    }
+
     /// Add a transcript chunk to be saved later (legacy method)
     pub fn add_transcript_chunk(&self, text: String) {
         self.recording_saver.add_transcript_chunk(text);

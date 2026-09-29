@@ -94,6 +94,31 @@ impl RecordingSaver {
         }
     }
 
+    /// Переподписать собеседников по итогам пересмотра разметки (ключ - начало реплики, мс).
+    /// Файл transcripts.json в папке записи обновляется сразу.
+    pub fn relabel_speakers(&self, changes: &std::collections::HashMap<i64, usize>) {
+        let mut changed = 0usize;
+        if let Ok(mut segments) = self.transcript_segments.lock() {
+            for seg in segments.iter_mut() {
+                let is_guest = seg.speaker.as_deref().map(|s| s.starts_with("system")).unwrap_or(false);
+                if !is_guest {
+                    continue;
+                }
+                if let Some(n) = changes.get(&crate::audio::diarization::segment_key(seg.audio_start_time)) {
+                    seg.speaker = Some(format!("system_{}", n));
+                    changed += 1;
+                }
+            }
+        }
+        if changed > 0 {
+            if let Some(folder) = &self.meeting_folder {
+                if let Err(e) = self.write_transcripts_json(folder) {
+                    warn!("Failed to write relabeled transcripts: {}", e);
+                }
+            }
+        }
+    }
+
     /// Add or update a structured transcript segment (upserts based on sequence_id)
     /// Also saves incrementally to disk
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {

@@ -40,6 +40,47 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
+
+/// Поколение фонового пересмотра разметки: новая запись - новое поколение, старая
+/// задача (если ещё спит) по нему понимает, что ей пора завершиться.
+static RELABEL_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Раз в 30 с пересматривать разметку собеседников по всей записи: если два похожих
+/// голоса слились под одним номером, реплики перекрашиваются уже во время встречи
+/// (окно записи получает событие speakers-relabeled, файл записи обновляется).
+fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
+    let generation = RELABEL_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            if RELABEL_GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation {
+                break;
+            }
+            // Запись закончилась - итог посчитает выгрузка модели (final_relabel).
+            let recording = RECORDING_MANAGER.lock().map(|m| m.is_some()).unwrap_or(false);
+            if !recording {
+                break;
+            }
+            let changes = tauri::async_runtime::spawn_blocking(crate::audio::diarization::relabel_live)
+                .await
+                .unwrap_or_default();
+            if changes.is_empty() {
+                continue;
+            }
+            let map: std::collections::HashMap<i64, usize> = changes.iter().cloned().collect();
+            if let Ok(guard) = RECORDING_MANAGER.lock() {
+                if let Some(manager) = guard.as_ref() {
+                    manager.relabel_speakers(&map);
+                }
+            }
+            let payload: Vec<serde_json::Value> = changes
+                .iter()
+                .map(|(key, n)| serde_json::json!({ "key": key, "speaker": format!("system_{}", n) }))
+                .collect();
+            let _ = app.emit("speakers-relabeled", serde_json::json!({ "changes": payload }));
+        }
+    });
+}
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
@@ -138,6 +179,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                 warn!("[diarization] распознавание говорящих недоступно: {}", e);
             }
         });
+        spawn_live_relabel(app.clone());
     }
 
     // Async-first approach - no more blocking operations!
@@ -425,6 +467,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                 warn!("[diarization] распознавание говорящих недоступно: {}", e);
             }
         });
+        spawn_live_relabel(app.clone());
     }
 
     // Parse devices
