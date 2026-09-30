@@ -1252,6 +1252,134 @@ pub fn maybe_auto_summary<R: Runtime>(app: tauri::AppHandle<R>, pool: SqlitePool
     });
 }
 
+/// Папка «памяти» для фонового резюме.
+///
+/// Geo 30.09: резюме искажало партнёров и термины («Памбаду» вместо Pampadu, «гроз КВ» вместо gross КВ):
+/// «будто у неё нет моей памяти». Резюме пишет Claude или Codex на компьютере пользователя, поэтому запускаем
+/// его там, где пользователь обычно с ним работает: в этой папке лежат CLAUDE.md / AGENTS.md, а Claude ещё
+/// подтягивает память проекта (~/.claude/projects/<папка>/memory/MEMORY.md).
+/// Выбор: проект Claude Code, чья память обновлялась последней; сама папка - из поля "cwd" его последнего
+/// разговора. Переопределить - переменная окружения INSAPP_MEET_MEMORY_DIR. Не нашли - None (домашняя папка).
+pub(crate) fn summary_memory_workdir() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("INSAPP_MEET_MEMORY_DIR") {
+        let p = PathBuf::from(dir);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    let projects = dirs::home_dir()?.join(".claude").join("projects");
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for e in std::fs::read_dir(&projects).ok()?.flatten() {
+        let mem = e.path().join("memory").join("MEMORY.md");
+        if let Some(mt) = std::fs::metadata(&mem).ok().and_then(|m| m.modified().ok()) {
+            if best.as_ref().map_or(true, |(b, _)| mt > *b) {
+                best = Some((mt, e.path()));
+            }
+        }
+    }
+    let (_, project) = best?;
+    let mut sessions: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&project)
+        .ok()?
+        .flatten()
+        .filter(|e| e.path().extension().map_or(false, |x| x == "jsonl"))
+        .filter_map(|e| e.metadata().ok().and_then(|m| m.modified().ok()).map(|t| (t, e.path())))
+        .collect();
+    sessions.sort_by(|a, b| b.0.cmp(&a.0));
+    sessions
+        .into_iter()
+        .take(5)
+        .filter_map(|(_, f)| cwd_of_session(&f))
+        .find(|p| p.is_dir())
+}
+
+/// Папка, из которой шёл разговор Claude Code (поле "cwd" в первых строках файла разговора).
+fn cwd_of_session(file: &std::path::Path) -> Option<PathBuf> {
+    use std::io::{BufRead, BufReader};
+    let f = std::fs::File::open(file).ok()?;
+    BufReader::new(f)
+        .lines()
+        .take(50)
+        .map_while(Result::ok)
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(&l).ok())
+        .find_map(|v| v.get("cwd").and_then(|c| c.as_str()).map(PathBuf::from))
+}
+
+/// Одна попытка запуска CLI резюме.
+struct CliAttempt {
+    cmd: String,
+    args: Vec<String>,
+    /// Папка запуска: None - как у приложения.
+    cwd: Option<PathBuf>,
+    label: &'static str,
+}
+
+/// Попытки запуска: сначала «с памятью пользователя», при быстром отказе - прежний режим без неё.
+fn summary_attempts(settings: &AiSummarySettings, transcript_dir: &str, memory_dir: Option<PathBuf>) -> Vec<CliAttempt> {
+    let home_or_memory = memory_dir.or_else(dirs::home_dir);
+    let model = settings.model.trim().to_string();
+    let with_model = |mut a: Vec<String>| {
+        if !model.is_empty() {
+            a.push("--model".to_string());
+            a.push(model.clone());
+        }
+        a
+    };
+    match settings.provider.as_str() {
+        // claude: --print отдаёт ответ в stdout вместо интерактивного чата.
+        "claude" => {
+            // С памятью: личные настройки пользователя (--setting-sources user) дают его CLAUDE.md и память
+            // проекта в папке запуска. Хуки и MCP-серверы пользователя резюме не нужны: хуки выключаем,
+            // MCP - пустым списком (иначе, например, Telegram-сервер занимал бы базу сессии).
+            let memory = with_model(vec![
+                "--print".to_string(),
+                "--setting-sources".to_string(),
+                "user".to_string(),
+                "--settings".to_string(),
+                r#"{"disableAllHooks":true}"#.to_string(),
+                "--strict-mcp-config".to_string(),
+                "--mcp-config".to_string(),
+                r#"{"mcpServers":{}}"#.to_string(),
+                "--permission-mode".to_string(),
+                "bypassPermissions".to_string(),
+                "--add-dir".to_string(),
+                transcript_dir.to_string(),
+                "--allowedTools".to_string(),
+                "Read".to_string(),
+            ]);
+            // Прежний режим: --setting-sources=project,local ОБЯЗАТЕЛЕН - личные настройки пользователя
+            // (~/.claude/settings.json) могут содержать правила, которые новые версии CLI считают
+            // некорректными; тогда claude падает ещё до работы. Подписки это не касается.
+            let plain = with_model(vec![
+                "--print".to_string(),
+                "--setting-sources".to_string(),
+                "project,local".to_string(),
+                "--permission-mode".to_string(),
+                "bypassPermissions".to_string(),
+                "--add-dir".to_string(),
+                transcript_dir.to_string(),
+                "--allowedTools".to_string(),
+                "Read".to_string(),
+            ]);
+            vec![
+                CliAttempt { cmd: settings.command.clone(), args: memory, cwd: home_or_memory, label: "с памятью" },
+                CliAttempt { cmd: settings.command.clone(), args: plain, cwd: None, label: "без памяти" },
+            ]
+        }
+        // codex: exec - неинтерактивный режим. ~/.codex/AGENTS.md он читает сам, AGENTS.md проекта - из папки
+        // запуска; вне git-репозитория без --skip-git-repo-check codex exec отказывается работать.
+        "codex" => vec![
+            CliAttempt {
+                cmd: settings.command.clone(),
+                args: vec!["exec".to_string(), "--skip-git-repo-check".to_string()],
+                cwd: home_or_memory,
+                label: "с памятью",
+            },
+            CliAttempt { cmd: settings.command.clone(), args: vec!["exec".to_string()], cwd: None, label: "без памяти" },
+        ],
+        _ => vec![CliAttempt { cmd: settings.command.clone(), args: settings.args.clone(), cwd: None, label: "свой инструмент" }],
+    }
+}
+
 /// Запустить CLI неинтерактивно и получить markdown резюме из stdout.
 async fn run_cli_once(
     settings: &AiSummarySettings,
@@ -1261,7 +1389,11 @@ async fn run_cli_once(
 ) -> Result<String, String> {
     let prompt = format!(
         "{}\n\nРЕЖИМ: резюме делается в фоне, собеседника нет. Выведи ТОЛЬКО готовый протокол - \
-         без вопросов, предложений правок и фраз вроде «готов доработать».",
+         без вопросов, предложений правок и фраз вроде «готов доработать».\n\n\
+         ПАМЯТЬ: расшифровка сделана на слух и искажает имена людей, названия компаний, партнёров, продуктов \
+         и термины. Пиши их так, как они записаны в твоей памяти и инструкциях (CLAUDE.md, AGENTS.md, память \
+         проекта); если там их нет - восстанавливай по смыслу. Правила из памяти о формате ответов в чате \
+         к протоколу не относятся: формат задаёт этот запрос.",
         settings
             .prompt_template
             .replace("{title}", title)
@@ -1273,53 +1405,57 @@ async fn run_cli_once(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let (cmd, args): (String, Vec<String>) = match settings.provider.as_str() {
-        // claude: --print отдаёт ответ в stdout вместо интерактивного чата.
-        //
-        // --setting-sources=project,local ОБЯЗАТЕЛЕН: личные настройки
-        // пользователя (~/.claude/settings.json) могут содержать правила,
-        // которые новые версии CLI считают некорректными - тогда claude падает
-        // ещё до работы, и резюме не создаётся ни для одной встречи.
-        // Подписки это не касается: авторизация хранится отдельно от настроек.
-        "claude" => {
-            let mut a = vec![
-                "--print".to_string(),
-                "--setting-sources".to_string(),
-                "project,local".to_string(),
-                "--permission-mode".to_string(),
-                "bypassPermissions".to_string(),
-                "--add-dir".to_string(),
-                dir,
-                "--allowedTools".to_string(),
-                "Read".to_string(),
-            ];
-            // Модель: по умолчанию «sonnet» - всегда последняя версия Sonnet.
-            if !settings.model.trim().is_empty() {
-                a.push("--model".to_string());
-                a.push(settings.model.trim().to_string());
+    let attempts = summary_attempts(settings, &dir, summary_memory_workdir());
+    let mut last_err = String::from("не удалось запустить инструмент резюме");
+    for (i, a) in attempts.iter().enumerate() {
+        let started = std::time::Instant::now();
+        match run_cli_attempt(a, &prompt, track_pid).await {
+            Ok(text) => {
+                log::info!(
+                    "[ai-summary] резюме готово ({}, папка {})",
+                    a.label,
+                    a.cwd.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "приложения".to_string())
+                );
+                return Ok(text);
             }
-            (settings.command.clone(), a)
+            Err(e) => {
+                // Повторяем без памяти только быстрый отказ (например, CLI не принял личные настройки).
+                // Вход в Claude и 12-минутный лимит повтором не лечатся.
+                let retry = i + 1 < attempts.len()
+                    && started.elapsed() < std::time::Duration::from_secs(90)
+                    && e != AUTH_ERROR
+                    && !e.starts_with("обработка заняла");
+                log::warn!("[ai-summary] попытка «{}» не удалась: {}{}", a.label, e, if retry { " - повторяю" } else { "" });
+                last_err = e;
+                if !retry {
+                    break;
+                }
+            }
         }
-        // codex: exec - неинтерактивный режим
-        "codex" => (settings.command.clone(), vec!["exec".to_string()]),
-        _ => (settings.command.clone(), settings.args.clone()),
-    };
+    }
+    Err(last_err)
+}
 
+/// Один запуск CLI: промпт во входной поток, ответ - из stdout.
+async fn run_cli_attempt(a: &CliAttempt, prompt: &str, track_pid: bool) -> Result<String, String> {
+    let cmd = &a.cmd;
     // Промпт передаём ЧЕРЕЗ ВХОДНОЙ ПОТОК, а не аргументом: он многострочный,
     // и как аргумент обрезался - CLI отвечал «нет входных данных».
     use tokio::io::AsyncWriteExt;
-    let mut child = tokio::process::Command::new(&cmd)
-        .args(&args)
+    let mut command = tokio::process::Command::new(cmd);
+    command
+        .args(&a.args)
         .env("PATH", crate::pty_terminal::enriched_path())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         // По истечении 12 минут ожидание бросается - вместе с ним снимаем и процесс,
         // иначе зависший CLI так и висел бы в фоне.
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("не запустить {}: {}", cmd, e))?;
-
+        .kill_on_drop(true);
+    if let Some(dir) = &a.cwd {
+        command.current_dir(dir);
+    }
+    let mut child = command.spawn().map_err(|e| format!("не запустить {}: {}", cmd, e))?;
     // Запоминаем процесс - чтобы кнопка «Остановить» пакетной генерации могла
     // снять его сразу. Одиночные фоновые задания сюда не пишем: иначе «Остановить»
     // в окне «Резюме для всех» снимало бы чужой процесс.
@@ -1684,6 +1820,66 @@ mod summary_job_tests {
         assert!(prompt.contains("РЕЖИМ: резюме делается в фоне"));
         assert_eq!(CURRENT_CHILD_PID.load(std::sync::atomic::Ordering::Relaxed), 0, "фоновое задание не должно занимать кнопку «Остановить» пакета");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Резюме с памятью пользователя: личные настройки Claude (его CLAUDE.md и память проекта в папке
+    /// запуска), без хуков и MCP-серверов; в промпте - правило писать имена и термины по памяти.
+    #[tokio::test]
+    async fn summary_runs_with_user_memory_in_memory_dir() {
+        let dir = temp_dir("mem");
+        let mem = dir.join("проект с памятью");
+        std::fs::create_dir_all(&mem).unwrap();
+        let cli = fake_cli(
+            &dir,
+            &format!(
+                r#"printf '%s\n' "$@" > "{d}/args.txt"; pwd > "{d}/pwd.txt"; cat > "{d}/prompt.txt"; echo '# Протокол'"#,
+                d = dir.display()
+            ),
+        );
+        let transcript = dir.join("transcript.txt");
+        std::fs::write(&transcript, "Вы: привет").unwrap();
+
+        let attempts = summary_attempts(&settings_for(&cli), &dir.to_string_lossy(), Some(mem.clone()));
+        assert_eq!(attempts.len(), 2);
+        let prompt = "протокол ПАМЯТЬ";
+        let out = run_cli_attempt(&attempts[0], prompt, false).await.unwrap();
+        assert_eq!(out, "# Протокол");
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt")).unwrap().lines().map(String::from).collect();
+        let i = args.iter().position(|a| a == "--setting-sources").unwrap();
+        assert_eq!(args[i + 1], "user", "личные настройки (память) должны подключаться: {:?}", args);
+        assert!(args.contains(&"--strict-mcp-config".to_string()), "MCP-серверы пользователя резюме не нужны: {:?}", args);
+        assert!(args.iter().any(|a| a.contains("disableAllHooks")), "хуки пользователя должны быть выключены: {:?}", args);
+        let pwd = std::fs::read_to_string(dir.join("pwd.txt")).unwrap();
+        assert_eq!(std::fs::canonicalize(pwd.trim()).unwrap(), std::fs::canonicalize(&mem).unwrap(), "запуск должен идти из папки памяти");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Если CLI не принял личные настройки и сразу упал - резюме всё равно делается прежним способом.
+    #[tokio::test]
+    async fn broken_user_settings_fall_back_to_plain_run() {
+        let dir = temp_dir("fallback");
+        let cli = fake_cli(
+            &dir,
+            &format!(
+                r#"cat > /dev/null; for a in "$@"; do if [ "$a" = "user" ]; then echo "Invalid settings: permissions.allow"; exit 1; fi; done; printf '%s\n' "$@" > "{d}/args.txt"; echo '# Протокол без памяти'"#,
+                d = dir.display()
+            ),
+        );
+        let transcript = dir.join("transcript.txt");
+        std::fs::write(&transcript, "Вы: привет").unwrap();
+        let out = run_cli_once(&settings_for(&cli), &transcript, "t", false).await.unwrap();
+        assert_eq!(out, "# Протокол без памяти");
+        let args = std::fs::read_to_string(dir.join("args.txt")).unwrap();
+        assert!(args.contains("project,local"), "второй запуск - прежний режим: {}", args);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prompt_asks_to_spell_names_by_memory() {
+        // Правило добавляется к любому шаблону промпта, в том числе сохранённому у пользователя раньше.
+        let src = include_str!("pty_terminal_commands.rs");
+        assert!(src.contains("ПАМЯТЬ: расшифровка сделана на слух"));
     }
 
     #[tokio::test]

@@ -3,10 +3,12 @@
 /**
  * Прошедшая встреча на главном экране (эталон b-air/home.html):
  *  - центр: «Внутренняя ▾ · дата · длительность · на сервере», крупное название (правится),
- *    участники с долями речи и «назвать», «Поделиться · без пароля» и «Скопировать для Telegram»,
- *    строка ссылок «Скачать .md · Открыть папку · Сделать резюме заново», резюме документом
- *    («Править», подпись «Резюме написал Claude Sonnet в чч:мм») или пустое состояние «Сделать резюме»;
- *  - справа: расшифровка мессенджером с поиском и «Скопировать расшифровку».
+ *    строка ссылок «Скачать .md · Открыть папку · Сделать резюме заново», кнопки «Скопировать для Telegram»
+ *    и «Поделиться · без пароля», резюме документом («Править», подпись «Резюме написал Claude Sonnet
+ *    в чч:мм») или пустое состояние «Сделать резюме»;
+ *  - справа: расшифровка мессенджером с поиском и «Скопировать расшифровку», под ней - «Участники»
+ *    (доли речи, минуты, «назвать»), как на экране записи. Geo 30.09: строка участников под названием
+ *    занимала много места внутри каждой встречи.
  *
  * Хуки те же, что у старого экрана встречи (app/meeting-details/page-content.tsx):
  * useMeetingData, useSummaryGeneration, useCopyOperations, useMeetingOperations, useTemplates;
@@ -45,7 +47,8 @@ import {
 } from '@/lib/meetingFormat';
 import { computeSpeakerStats, roundShares } from '@/lib/speakerStats';
 import { SummaryDocument, separateHeaderLines } from './SummaryDocument';
-import { Avatar, Dot } from './primitives';
+import { Dot } from './primitives';
+import { ParticipantsCard, Participant } from './ParticipantsCard';
 import type { MeetingListItem } from './UnifiedSidebar';
 
 interface MeetingViewProps {
@@ -91,59 +94,6 @@ const BTN = 'inline-flex h-10 flex-none items-center gap-2 whitespace-nowrap rou
 const BTN_PRIMARY = `${BTN} bg-im-acc text-white hover:bg-im-acc-h`;
 const BTN_OUTLINE = `${BTN} bg-white text-im-ink2 shadow-[inset_0_0_0_1px_var(--im-line2)] hover:bg-im-hover`;
 const QL = 'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-lg text-[13px] font-medium leading-[18px] text-im-ink2 transition-colors hover:text-im-on-tone disabled:opacity-50 disabled:hover:text-im-ink2';
-
-interface Participant {
-  key: string;
-  label: string;
-  short: string;
-  initials: string;
-  me: boolean;
-  unnamed: boolean;
-  pct: number;
-}
-
-/** Участник в строке под названием: круг, имя, доля речи; у безымянного - «назвать». */
-function ParticipantChip({ p, onRename }: { p: Participant; onRename: (name: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState('');
-  const doneRef = useRef(false);
-  const start = () => { doneRef.current = false; setValue(p.unnamed ? '' : p.label); setEditing(true); };
-  const finish = (save: boolean) => {
-    // Enter и потеря фокуса могут прийти оба - сохраняем один раз.
-    if (doneRef.current) return;
-    doneRef.current = true;
-    const v = value.trim();
-    setEditing(false);
-    if (save && v && v !== p.label) onRename(v);
-  };
-  return (
-    <span className="inline-flex items-center gap-[5px]" title={`${p.label} - доля речи ${p.pct}%`}>
-      <Avatar initials={p.initials} me={p.me} size={22} fontSize={9} />
-      {editing ? (
-        <input
-          autoFocus
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); }}
-          onBlur={() => finish(true)}
-          placeholder="Имя участника"
-          aria-label={`Имя участника: ${p.label}`}
-          className="h-[26px] w-[130px] rounded-[13px] border-[1.5px] border-im-acc bg-white px-2.5 text-[13px] text-im-ink outline-none placeholder:text-im-mut"
-        />
-      ) : p.me ? (
-        <span>{p.short}</span>
-      ) : (
-        <button type="button" onClick={start} className="rounded-md hover:text-im-on-tone" title="Нажмите, чтобы изменить имя">{p.short}</button>
-      )}
-      <em className="text-[11px] not-italic text-im-mut im-num">{p.pct}%</em>
-      {p.unnamed && !editing && (
-        <button type="button" onClick={start} className="rounded-md text-[13px] font-semibold text-im-on-tone hover:underline hover:underline-offset-[3px]">
-          назвать
-        </button>
-      )}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------- экран встречи
 export function MeetingView({
@@ -242,7 +192,10 @@ export function MeetingView({
         const label = names.labelFor(s.key) || '';
         const unnamed = !me && /^system(_\d+)?$/.test(s.key) && !names.names[s.key];
         const initials = me ? meInitials : unnamed ? '?' : initialsOf(label);
-        return { key: s.key, label, short: me ? 'Вы' : shortName(label), initials, me, unnamed, pct: pct[s.key] ?? 0 };
+        return {
+          key: s.key, label, short: me ? 'Вы' : shortName(label), initials, me, unnamed,
+          pct: pct[s.key] ?? 0, share: s.share, seconds: s.seconds,
+        };
       });
   }, [stats, names, meInitials]);
 
@@ -432,42 +385,8 @@ export function MeetingView({
           )}
         </div>
 
-        {/* Участники с долями речи */}
-        {participants.length > 0 && (
-          <div className="mt-2.5 flex flex-none flex-wrap items-center gap-x-[11px] gap-y-1.5 whitespace-nowrap text-[13px] leading-[18px] tracking-[-0.01em] text-im-ink2">
-            {participants.map((p) => (
-              <ParticipantChip key={p.key} p={p} onRename={(name) => names.saveName(p.key, name)} />
-            ))}
-          </div>
-        )}
-
-        {/* Две кнопки с заливкой: «Поделиться» и «Скопировать для Telegram» */}
-        <div className="mt-[18px] flex flex-none flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => { Analytics.trackButtonClick('share_meeting', 'meeting_details'); share(); }}
-            disabled={sharing}
-            title="Ссылка откроется без пароля"
-            className={BTN_PRIMARY}
-          >
-            {sharing ? <Loader2 className="h-5 w-5 animate-spin" /> : shared ? <Check className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
-            {shared ? 'Ссылка скопирована' : 'Поделиться'}
-            {!shared && <span className="-ml-0.5 font-normal">· без пароля</span>}
-          </button>
-          <button
-            type="button"
-            onClick={() => { Analytics.trackButtonClick('copy_summary_telegram', 'meeting_details'); exporter.copyForTelegram(); }}
-            disabled={!hasSummary}
-            title={hasSummary ? 'Резюме в формате для Telegram' : 'Сначала сделайте резюме'}
-            className={BTN_OUTLINE}
-          >
-            {exporter.copied ? <Check className="h-5 w-5" /> : <Send className="h-5 w-5" />}
-            {exporter.copied ? 'Скопировано' : 'Скопировать для Telegram'}
-          </button>
-        </div>
-
-        {/* Тихие ссылки */}
-        <div className="mt-3 flex flex-none flex-wrap items-center gap-x-5 gap-y-1">
+        {/* Тихие ссылки: файл, папка, резюме заново - сразу под названием */}
+        <div className="mt-2 flex flex-none flex-wrap items-center gap-x-5 gap-y-1">
           <button type="button" onClick={exporter.downloadMd} disabled={!hasSummary} className={QL} title={hasSummary ? 'Резюме файлом .md в «Загрузки»' : 'Сначала сделайте резюме'}>
             <Download className="h-4 w-4" />Скачать .md
           </button>
@@ -511,6 +430,32 @@ export function MeetingView({
             </button>
           )}
         </div>
+
+        {/* Кнопки резюме: «Скопировать для Telegram» и «Поделиться · без пароля» - прямо над резюме */}
+        <div className="mt-4 flex flex-none flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { Analytics.trackButtonClick('copy_summary_telegram', 'meeting_details'); exporter.copyForTelegram(); }}
+            disabled={!hasSummary}
+            title={hasSummary ? 'Резюме в формате для Telegram' : 'Сначала сделайте резюме'}
+            className={BTN_OUTLINE}
+          >
+            {exporter.copied ? <Check className="h-5 w-5" /> : <Send className="h-5 w-5" />}
+            {exporter.copied ? 'Скопировано' : 'Скопировать для Telegram'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { Analytics.trackButtonClick('share_meeting', 'meeting_details'); share(); }}
+            disabled={sharing}
+            title="Ссылка откроется без пароля"
+            className={BTN_PRIMARY}
+          >
+            {sharing ? <Loader2 className="h-5 w-5 animate-spin" /> : shared ? <Check className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
+            {shared ? 'Ссылка скопирована' : 'Поделиться'}
+            {!shared && <span className="-ml-0.5 font-normal">· без пароля</span>}
+          </button>
+        </div>
+
 
         {/* Резюме документом */}
         <div className="im-scroll -mx-8 mt-[18px] flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-im-line px-8 pb-9 pt-6">
@@ -589,22 +534,25 @@ export function MeetingView({
         </div>
       </main>
 
-      {/* ------------------------------------------------------------ справа: расшифровка */}
-      <TranscriptSheet
-        meetingId={meeting.id}
-        segments={segments}
-        allSegments={allSegments}
-        hasMore={hasMore}
-        isLoadingMore={isLoadingMore}
-        totalCount={totalCount}
-        loadedCount={loadedCount}
-        onLoadMore={onLoadMore}
-        names={names}
-        durationText={durationText}
-        speakersCount={speakersCount}
-        onCopy={() => { Analytics.trackButtonClick('copy_transcript', 'meeting_details'); copyOperations.handleCopyTranscript(names.labelFor); }}
-        onDeleteMeeting={handleDeleteMeeting}
-      />
+      {/* ------------------------------------------------------------ справа: расшифровка и участники */}
+      <div className="flex min-h-0 min-w-0 flex-col gap-2">
+        <TranscriptSheet
+          meetingId={meeting.id}
+          segments={segments}
+          allSegments={allSegments}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          totalCount={totalCount}
+          loadedCount={loadedCount}
+          onLoadMore={onLoadMore}
+          names={names}
+          durationText={durationText}
+          speakersCount={speakersCount}
+          onCopy={() => { Analytics.trackButtonClick('copy_transcript', 'meeting_details'); copyOperations.handleCopyTranscript(names.labelFor); }}
+          onDeleteMeeting={handleDeleteMeeting}
+        />
+        <ParticipantsCard participants={participants} onRename={(key, name) => names.saveName(key, name)} />
+      </div>
     </>
   );
 }
@@ -677,7 +625,7 @@ function TranscriptSheet({
   const iconBtn = 'grid h-9 w-9 flex-none place-items-center rounded-[18px] text-im-mut transition-[background,border-radius] duration-200 hover:bg-im-tray active:rounded-[10px]';
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-col rounded-[28px] bg-im-sheet pt-3" aria-label="Расшифровка">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[28px] bg-im-sheet pt-3" aria-label="Расшифровка">
       <div className="flex h-9 flex-none items-center gap-2 pb-1 pl-6 pr-3.5">
         {searchOpen ? (
           <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-[18px] bg-im-tray px-3 text-im-mut focus-within:shadow-[inset_0_0_0_2px_var(--im-acc)]">
