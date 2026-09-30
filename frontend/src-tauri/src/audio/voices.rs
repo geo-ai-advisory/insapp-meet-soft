@@ -99,10 +99,11 @@ pub async fn load_profiles(pool: &SqlitePool) -> Vec<(String, Vec<f32>)> {
     let mut by: Vec<(String, String, Vec<f32>)> = Vec::new(); // (ключ, имя для показа, сумма)
     for (name, blob, sec) in rows {
         let shown = name.trim().to_string();
-        if shown.is_empty() {
+        let key = shown.to_lowercase();
+        // «Вы» у собеседника - его реплики слиты с вашими (эхо вашего голоса): это не голос коллеги.
+        if shown.is_empty() || key == "вы" {
             continue;
         }
-        let key = shown.to_lowercase();
         let c = from_blob(&blob);
         let w = (sec as f32).min(600.0);
         match by.iter_mut().find(|(k, _, _)| *k == key) {
@@ -297,7 +298,7 @@ pub async fn voices_list(state: tauri::State<'_, crate::state::AppState>) -> Res
         "SELECT sn.display_name, COUNT(DISTINCT mv.meeting_id), SUM(mv.seconds)
          FROM meeting_voices mv
          JOIN speaker_names sn ON sn.meeting_id = mv.meeting_id AND sn.speaker_key = mv.speaker_key
-         WHERE sn.speaker_key LIKE 'system%'
+         WHERE sn.speaker_key LIKE 'system%' AND trim(sn.display_name) NOT IN ('Вы', 'вы', 'ВЫ') -- lower() в SQLite не знает кириллицу
          GROUP BY lower(trim(sn.display_name)) ORDER BY SUM(mv.seconds) DESC",
     )
     .fetch_all(pool)

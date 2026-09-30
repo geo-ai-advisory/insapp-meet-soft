@@ -77,3 +77,54 @@ export function formatSpeech(seconds: number): string {
   const ss = String(s % 60).padStart(2, '0');
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
+
+/**
+ * Имя «Вы» у голоса собеседника: его реплики слиты с вашими (например, эхо вашего голоса
+ * в звуке собеседников). Такой голос считается и показывается как вы.
+ */
+export const ME_LABEL = 'Вы';
+
+/**
+ * Меньше 3% речи и без имени - почти всегда осколок чужого голоса или шум: в списках участников
+ * и «Кто сколько говорит» не показываем (Geo 30.09: «собеседников с долей меньше 3 процентов скрывай»).
+ */
+export const MIN_VISIBLE_SHARE = 0.03;
+
+/** Голоса одного человека (одинаковая подпись) - одной строкой: секунды и реплики складываются. */
+export interface MergedStat extends SpeakerStat {
+  /** Все метки голоса этого человека; key - главная (у «Вы» - микрофон). */
+  keys: string[];
+}
+
+/**
+ * Слить голоса по подписи. Geo 30.09: в разговоре один на один речь собеседника местами уходит
+ * в других «Собеседников» - такого собеседника называют именем уже известного участника
+ * (или «Вы»), и дальше это один человек: одна строка в участниках, одна доля речи.
+ */
+export function mergeStatsByLabel(stats: SpeakerStat[], labelFor: (key?: string) => string | undefined): MergedStat[] {
+  const groups = new Map<string, MergedStat>();
+  for (const s of stats) {
+    const label = (s.key === 'mic' ? ME_LABEL : labelFor(s.key) || s.key).trim().toLowerCase();
+    const g = groups.get(label);
+    if (!g) {
+      groups.set(label, { ...s, keys: [s.key] });
+      continue;
+    }
+    g.keys.push(s.key);
+    g.seconds += s.seconds;
+    g.count += s.count;
+    g.firstIndex = Math.min(g.firstIndex, s.firstIndex);
+    if (s.lastAt >= g.lastAt) {
+      g.lastAt = s.lastAt;
+      if (s.lastText) g.lastText = s.lastText;
+    }
+    if (s.key === 'mic') {
+      g.key = 'mic';
+      g.keys = ['mic', ...g.keys.filter((k) => k !== 'mic')];
+    }
+  }
+  const list = Array.from(groups.values());
+  const total = list.reduce((a, s) => a + s.seconds, 0) || 1;
+  list.forEach((s) => { s.share = s.seconds / total; });
+  return list;
+}

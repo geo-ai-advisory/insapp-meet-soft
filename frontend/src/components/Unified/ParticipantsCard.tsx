@@ -15,6 +15,8 @@ import { Avatar, FlatBar, useElementWidth } from './primitives';
 
 export interface Participant {
   key: string;
+  /** Все метки голоса этого человека (голоса, слитые вручную одним именем). */
+  keys: string[];
   label: string;
   short: string;
   initials: string;
@@ -27,11 +29,13 @@ export interface Participant {
 
 const LIMIT = 4;
 
-function ParticipantRow({ p, width, scale, onRename }: {
+function ParticipantRow({ p, width, scale, onRename, suggestions }: {
   p: Participant;
   width: number;
   scale: number;
   onRename: (name: string) => void;
+  /** Имена других участников (и «Вы»): выбрать одно из них - слить реплики с этим человеком. */
+  suggestions: string[];
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
@@ -51,16 +55,22 @@ function ParticipantRow({ p, width, scale, onRename }: {
       <div className="flex h-6 items-center gap-2 text-[13px] leading-[18px] text-im-ink2">
         <Avatar initials={p.initials} me={p.me} size={22} fontSize={9} />
         {editing ? (
-          <input
-            autoFocus
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); }}
-            onBlur={() => finish(true)}
-            placeholder="Имя участника"
-            aria-label={`Имя участника: ${p.label}`}
-            className="h-6 min-w-0 flex-1 rounded-xl border-[1.5px] border-im-acc bg-white px-2.5 text-[13px] text-im-ink outline-none placeholder:text-im-mut"
-          />
+          <>
+            <input
+              autoFocus
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); }}
+              onBlur={() => finish(true)}
+              placeholder="Имя или кто-то из участников"
+              aria-label={`Имя участника: ${p.label}`}
+              list={`im-people-${p.key}`}
+              className="h-6 min-w-0 flex-1 rounded-xl border-[1.5px] border-im-acc bg-white px-2.5 text-[13px] text-im-ink outline-none placeholder:text-im-mut"
+            />
+            <datalist id={`im-people-${p.key}`}>
+              {suggestions.map((n) => <option key={n} value={n} />)}
+            </datalist>
+          </>
         ) : (
           <>
             {p.me ? (
@@ -98,7 +108,7 @@ function ParticipantRow({ p, width, scale, onRename }: {
 
 export function ParticipantsCard({ participants, onRename }: {
   participants: Participant[];
-  onRename: (key: string, name: string) => void;
+  onRename: (keys: string[], name: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const { ref, width } = useElementWidth<HTMLDivElement>(300);
@@ -122,7 +132,14 @@ export function ParticipantsCard({ participants, onRename }: {
       <div ref={ref} className="im-scroll min-h-0 overflow-y-auto px-5">
         <ul className="m-0 list-none p-0">
           {rows.map((p) => (
-            <ParticipantRow key={p.key} p={p} width={width} scale={scale} onRename={(name) => onRename(p.key, name)} />
+            <ParticipantRow
+              key={p.key}
+              p={p}
+              width={width}
+              scale={scale}
+              onRename={(name) => onRename(p.keys, name)}
+              suggestions={participants.filter((o) => o.key !== p.key && !o.unnamed).map((o) => o.label)}
+            />
           ))}
         </ul>
       </div>

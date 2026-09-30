@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useReducer, startTransition, useEffect, useState, memo } from "react";
+import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
@@ -8,6 +9,7 @@ import { motion } from "framer-motion";
 import { Trash2 } from "lucide-react";
 import { TranscriptSegmentData } from "@/types";
 import { useSpeakerNames, speakerLabel, SpeakerNamesApi, LIVE_SPEAKER_NAMES_KEY } from "@/hooks/useSpeakerNames";
+import { ME_LABEL } from "@/lib/speakerStats";
 import { formatTs, initialsOf } from "@/lib/meetingFormat";
 import { Avatar } from "@/components/Unified/primitives";
 
@@ -58,7 +60,7 @@ export interface VirtualizedTranscriptViewProps {
     speakerNames?: SpeakerNamesApi;
     /** «назвать» у безымянного голоса: своё действие (на записи - поле имени в панели «Участники»).
      *  Без него открывается окно «Имя участника». */
-    onNameRequest?: (speakerKey: string) => void;
+    onNameRequest?: (speakerKey: string) => void | boolean;
     /** Подсветить совпадения поиска. */
     highlight?: string;
     /** Текст, если реплик нет (например, поиск ничего не нашёл). */
@@ -254,6 +256,22 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         await names.saveName(key, name);
     }, [names]);
 
+    // Слить голос с уже известным участником (Geo 30.09: в разговоре один на один речь собеседника
+    // местами уходит в других «Собеседников»): «Вы» и имена, уже данные другим голосам.
+    const mergeTargetsFor = useCallback((key: string) => {
+        const own = (names.names[key] || '').trim().toLowerCase();
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const n of [ME_LABEL, ...Object.entries(names.names).filter(([k]) => k !== key).map(([, v]) => v)]) {
+            const t = (n || '').trim();
+            const low = t.toLowerCase();
+            if (!t || low === own || seen.has(low)) continue;
+            seen.add(low);
+            out.push(t);
+        }
+        return out;
+    }, [names.names]);
+
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
@@ -393,8 +411,12 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const nameRequestFor = useCallback(
         (sp?: string) => {
             if (!sp) return undefined;
-            if (onNameRequest) return () => onNameRequest(sp);
-            return () => { setRenamingKey(sp); setRenameValue(names.names[sp] || ''); };
+            return () => {
+                // Экран записи сам показывает поле имени; если поля нет (голос скрыт) - наше окно.
+                if (onNameRequest && onNameRequest(sp) !== false) return;
+                setRenamingKey(sp);
+                setRenameValue(names.names[sp] || '');
+            };
         },
         [names.names, onNameRequest]
     );
@@ -404,8 +426,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         const sp = (segment as any).speaker as string | undefined;
         const prevSp = index > 0 ? (segments[index - 1] as any).speaker : '__none__';
         const nextSp = index < segments.length - 1 ? (segments[index + 1] as any).speaker : '__none__';
-        const isMe = sp === 'mic';
+        // Голос, слитый с вашим (имя «Вы»), показываем как ваши реплики; подряд идущие реплики одного
+        // человека (даже под разными метками голоса) - одной группой.
+        const isMe = sp === 'mic' || names.names[sp ?? '']?.trim() === ME_LABEL;
         const unnamed = !!sp && !isMe && !names.names[sp];
+        const sameAs = (other?: string) => other !== '__none__' && labelFor(other) === labelFor(sp);
         return (
             <MessageRow
                 id={segment.id}
@@ -415,8 +440,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 label={labelFor(sp)}
                 isMe={isMe}
                 unnamed={unnamed}
-                firstOfRun={index === 0 || prevSp !== sp}
-                lastOfRun={index === segments.length - 1 || nextSp !== sp}
+                firstOfRun={index === 0 || !sameAs(prevSp)}
+                lastOfRun={index === segments.length - 1 || !sameAs(nextSp)}
                 isFirst={index === 0}
                 confidence={segment.confidence}
                 showConfidence={showConfidence}
@@ -448,9 +473,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         <div ref={scrollRef} className={`im-scroll im-fade-y flex h-full flex-col overflow-y-auto ${contentClassName}`}>
             {/* Окно «Имя участника»: клик по подписи спикера -> задать своё имя.
                 Имя применяется ко ВСЕМ репликам этого голоса и запоминается за встречей. */}
-            {renamingKey && (
+            {/* Окно - поверх всего экрана (портал в body): внутри колонки расшифровки оно оказывалось
+                под соседней колонкой, и видно было только размытую ленту. */}
+            {renamingKey && typeof document !== 'undefined' && createPortal(
                 <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-[#101828]/30 backdrop-blur-[2px]"
+                    className="fixed inset-0 z-[100] flex items-center justify-center bg-[#101828]/30 font-sans backdrop-blur-[2px]"
                     onClick={() => setRenamingKey(null)}
                 >
                     <div
@@ -466,6 +493,24 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 ? `Заменит подпись «${speakerLabel(renamingKey)}» во всей расшифровке этой встречи. Чтобы имя попало в резюме, сделайте резюме заново.`
                                 : `Заменит подпись «${speakerLabel(renamingKey)}» во всех репликах - и попадёт в резюме после встречи.`}
                         </p>
+                        {mergeTargetsFor(renamingKey).length > 0 && (
+                            <div className="mb-3">
+                                <p className="mb-1.5 text-[12px] leading-4 text-im-mut">Это кто-то из участников:</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                {mergeTargetsFor(renamingKey).map((t) => (
+                                    <button
+                                        key={t}
+                                        type="button"
+                                        onClick={() => saveSpeakerName(renamingKey, t)}
+                                        className="h-7 max-w-[150px] truncate rounded-[14px] bg-im-tone px-2.5 text-[12.5px] font-semibold text-im-on-tone transition-colors hover:bg-im-tone-h"
+                                        title={`Отдать реплики «${speakerLabel(renamingKey)}» участнику «${t}»`}
+                                    >
+                                        {t}
+                                    </button>
+                                ))}
+                                </div>
+                            </div>
+                        )}
                         <input
                             autoFocus
                             value={renameValue}
@@ -503,7 +548,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body,
             )}
 
             {segments.length === 0 ? (

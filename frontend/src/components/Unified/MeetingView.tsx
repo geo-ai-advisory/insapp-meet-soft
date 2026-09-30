@@ -45,7 +45,7 @@ import {
   daysAgo, formatDuration, formatKickDate, formatListWhen, hhmm, initialsOf, isFillerOnly, parseMeetingDate, plural,
   shortName, summaryMarkdownOf,
 } from '@/lib/meetingFormat';
-import { computeSpeakerStats, roundShares } from '@/lib/speakerStats';
+import { ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
 import { SummaryDocument, separateHeaderLines } from './SummaryDocument';
 import { Dot } from './primitives';
 import { ParticipantsCard, Participant } from './ParticipantsCard';
@@ -183,17 +183,22 @@ export function MeetingView({
       .then((id) => { if (id?.full_name?.trim()) setMeInitials(initialsOf(id.full_name)); })
       .catch(() => {});
   }, []);
+  // Голоса с одним именем - один человек (слитые вручную). Безымянные с долей меньше 3% - осколки
+  // и шум, в «Участниках» не показываем (Geo 30.09).
   const participants: Participant[] = useMemo(() => {
-    const pct = roundShares(stats);
-    return [...stats]
+    const merged = mergeStatsByLabel(stats, names.labelFor);
+    const named = (keys: string[]) => keys.some((k) => !!names.names[k] || (k !== 'mic' && !/^system(_\d+)?$/.test(k)));
+    const visible = merged.filter((s) => s.key === 'mic' || named(s.keys) || s.share >= MIN_VISIBLE_SHARE);
+    const pct = roundShares(visible);
+    return [...visible]
       .sort((a, b) => (a.key === 'mic' ? -1 : b.key === 'mic' ? 1 : b.share - a.share))
       .map((s) => {
         const me = s.key === 'mic';
-        const label = names.labelFor(s.key) || '';
-        const unnamed = !me && /^system(_\d+)?$/.test(s.key) && !names.names[s.key];
+        const label = me ? ME_LABEL : names.labelFor(s.key) || '';
+        const unnamed = !me && !named(s.keys);
         const initials = me ? meInitials : unnamed ? '?' : initialsOf(label);
         return {
-          key: s.key, label, short: me ? 'Вы' : shortName(label), initials, me, unnamed,
+          key: s.key, keys: s.keys, label, short: me ? 'Вы' : shortName(label), initials, me, unnamed,
           pct: pct[s.key] ?? 0, share: s.share, seconds: s.seconds,
         };
       });
@@ -294,7 +299,7 @@ export function MeetingView({
   );
 
   const durationText = formatDuration(meeting.duration);
-  const speakersCount = stats.length;
+  const speakersCount = participants.length;
 
   return (
     <>
@@ -551,7 +556,7 @@ export function MeetingView({
           onCopy={() => { Analytics.trackButtonClick('copy_transcript', 'meeting_details'); copyOperations.handleCopyTranscript(names.labelFor); }}
           onDeleteMeeting={handleDeleteMeeting}
         />
-        <ParticipantsCard participants={participants} onRename={(key, name) => names.saveName(key, name)} />
+        <ParticipantsCard participants={participants} onRename={async (keys, name) => { for (const k of keys) await names.saveName(k, name); }} />
       </div>
     </>
   );

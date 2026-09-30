@@ -15,7 +15,7 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { useSpeakerNames } from '@/hooks/useSpeakerNames';
 import { useSummaryReadiness } from '@/hooks/useSummaryJobs';
 import { defaultMeetingName, formatKickDate, initialsOf, isAutoMeetingTitle } from '@/lib/meetingFormat';
-import { computeSpeakerStats, formatSpeech, roundShares } from '@/lib/speakerStats';
+import { MergedStat, ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, formatSpeech, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
 import { Avatar, Dot, FlatBar, RecDot, Wave, useElementWidth } from './primitives';
 
 export type LiveKind = 'in' | 'out';
@@ -67,16 +67,32 @@ export function LiveView({
   const placeholder = defaultMeetingName(startedAt ?? new Date());
   const startText = startedAt ? formatKickDate(startedAt).replace(/^(Сегодня|Вчера), /, '$1, начало в ') : '';
 
-  // Участники: «Вы» всегда первым, дальше - в порядке первой реплики.
-  const others = stats.filter((s) => s.key !== 'mic').sort((a, b) => a.firstIndex - b.firstIndex);
-  const me = stats.find((s) => s.key === 'mic');
-  const known = others.filter((s) => !!names.names[s.key] || !/^system(_\d+)?$/.test(s.key));
-  const unknown = others.filter((s) => !names.names[s.key] && /^system(_\d+)?$/.test(s.key));
-  const count = 1 + others.length;
+  // Участники: «Вы» всегда первым, дальше - в порядке первой реплики. Голоса с одним именем - один
+  // человек (слитые вручную: «Это Саша»). Безымянные с долей меньше 3% не показываем - это осколки и шум.
+  const merged = useMemo(() => mergeStatsByLabel(stats, names.labelFor), [stats, names.labelFor]);
+  const isNamed = (s: MergedStat) => s.keys.some((k) => !!names.names[k] || (k !== 'mic' && !/^system(_\d+)?$/.test(k)));
+  const others = merged.filter((s) => s.key !== 'mic').sort((a, b) => a.firstIndex - b.firstIndex);
+  const me = merged.find((s) => s.key === 'mic');
+  const known = others.filter(isNamed);
+  const unknown = others.filter((s) => !isNamed(s) && s.share >= MIN_VISIBLE_SHARE);
+  const count = 1 + known.length + unknown.length;
+  const speakingIn = (s?: MergedStat) => !!speakingKey && !!s && s.keys.includes(speakingKey);
+  // Кому можно отдать реплики безымянного голоса: вы и уже известные участники.
+  const mergeTargets = [ME_LABEL, ...known.map((k) => names.labelFor(k.key) || '').filter(Boolean)];
+  const mergeInto = async (from: MergedStat, label: string) => {
+    const was = names.labelFor(from.key) || 'Собеседник';
+    for (const k of from.keys) await names.saveName(k, label);
+    toast.success(`Реплики «${was}» теперь у «${label}»`, { description: 'В расшифровке, долях речи и резюме - один человек' });
+  };
 
+  // «назвать» у реплики: поле имени в «Участниках»; у скрытого осколка (< 3%) поля нет - тогда
+  // лента откроет своё окно имени (там же «Это кто-то из участников»).
   const focusName = useCallback((key: string) => {
     const el = nameInputs.current[key];
-    if (el) { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.focus(); }
+    if (!el) return false;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el.focus();
+    return true;
   }, []);
 
   const autoOn = !!readiness?.auto_summary;
@@ -186,9 +202,9 @@ export function LiveView({
           <ul className="flex flex-col gap-0.5">
             {[{ key: 'mic' } as { key: string }, ...known].map((p, i, arr) => {
               const isMe = p.key === 'mic';
-              const s = isMe ? me : others.find((o) => o.key === p.key);
+              const s = isMe ? me : known.find((o) => o.key === p.key);
               const label = isMe ? 'Вы' : names.labelFor(p.key) || '';
-              const speaking = speakingKey === p.key;
+              const speaking = isMe ? speakingIn(me) || speakingKey === 'mic' : speakingIn(s);
               const radius = arr.length === 1 ? 'rounded-[20px]' : i === 0 ? 'rounded-[20px_20px_6px_6px]' : i === arr.length - 1 ? 'rounded-[6px_6px_20px_20px]' : 'rounded-[6px]';
               return (
                 <li key={p.key} className={`flex items-center gap-3 bg-white py-[11px] pl-2.5 pr-3 ${radius}`}>
@@ -219,10 +235,12 @@ export function LiveView({
               key={s.key}
               label={names.labelFor(s.key) || 'Собеседник'}
               lastText={s.lastText}
-              speaking={speakingKey === s.key}
+              speaking={speakingIn(s)}
+              targets={mergeTargets}
+              onMerge={(label) => mergeInto(s, label)}
               inputRef={(el) => { nameInputs.current[s.key] = el; }}
               onSave={async (name) => {
-                await names.saveName(s.key, name);
+                for (const k of s.keys) await names.saveName(k, name);
                 toast.success(`Имя сохранено: ${name}`, { description: 'Подставится во все реплики и в резюме' });
               }}
             />
@@ -230,11 +248,11 @@ export function LiveView({
         </div>
 
         <TalkCard
-          stats={stats}
+          stats={[...(me ? [me] : []), ...known, ...unknown]}
           speakingKey={speakingKey}
           elapsed={elapsed}
           labelFor={names.labelFor}
-          isUnnamed={(key) => /^system(_\d+)?$/.test(key) && !names.names[key]}
+          isUnnamed={(g) => !isNamed(g)}
           meInitials={meInitials}
         />
       </aside>
@@ -244,13 +262,16 @@ export function LiveView({
 
 /** Новый голос без имени: поле «Имя участника» + «Сохранить». */
 function UnknownSpeaker({
-  label, lastText, speaking, onSave, inputRef,
+  label, lastText, speaking, onSave, inputRef, targets, onMerge,
 }: {
   label: string;
   lastText: string;
   speaking: boolean;
   onSave: (name: string) => Promise<void>;
   inputRef: (el: HTMLInputElement | null) => void;
+  /** Известные участники (и «Вы»): реплики этого голоса можно отдать одному из них. */
+  targets: string[];
+  onMerge: (label: string) => Promise<void>;
 }) {
   const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
@@ -301,7 +322,24 @@ function UnknownSpeaker({
           Сохранить
         </button>
       </form>
-      <p className="mx-1 mt-2 text-[12px] leading-4 text-im-mut">Имя подставится во все реплики и в резюме</p>
+      {targets.length > 0 ? (
+        <div className="mx-1 mt-2.5 flex flex-wrap items-center gap-1.5 text-[12px] leading-4 text-im-mut">
+          <span>Или это:</span>
+          {targets.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => onMerge(t)}
+              className="h-7 max-w-[160px] truncate rounded-[14px] bg-im-tone px-2.5 text-[12.5px] font-semibold text-im-on-tone transition-colors hover:bg-im-tone-h"
+              title={`Отдать реплики «${label}» участнику «${t}»`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mx-1 mt-2 text-[12px] leading-4 text-im-mut">Имя подставится во все реплики и в резюме</p>
+      )}
     </div>
   );
 }
@@ -310,11 +348,11 @@ function UnknownSpeaker({
 function TalkCard({
   stats, speakingKey, elapsed, labelFor, isUnnamed, meInitials,
 }: {
-  stats: ReturnType<typeof computeSpeakerStats>;
+  stats: MergedStat[];
   speakingKey: string | null;
   elapsed: number;
   labelFor: (sp?: string) => string | undefined;
-  isUnnamed: (key: string) => boolean;
+  isUnnamed: (s: MergedStat) => boolean;
   meInitials: string;
 }) {
   const { ref, width } = useElementWidth<HTMLDivElement>(276);
@@ -337,11 +375,11 @@ function TalkCard({
           const label = labelFor(s.key) || '';
           const short = isMe ? 'Вы' : /^Собеседник/.test(label) ? label : label.split(/\s+/)[0];
           const frac = s.share / scale;
-          const now = speakingKey === s.key;
+          const now = !!speakingKey && s.keys.includes(speakingKey);
           return (
             <div key={s.key} className="mt-4">
               <div className="flex items-center gap-2 text-[13px] leading-[18px] text-im-ink2">
-                <Avatar initials={isMe ? meInitials : isUnnamed(s.key) ? '?' : initialsOf(label)} me={isMe} size={22} fontSize={9} />
+                <Avatar initials={isMe ? meInitials : isUnnamed(s) ? '?' : initialsOf(label)} me={isMe} size={22} fontSize={9} />
                 <span className="min-w-0 truncate">{short}</span>
                 <span className="ml-auto font-semibold text-im-ink im-num">{pct[s.key] ?? 0}%</span>
                 <time className="w-10 text-right text-im-mut im-num">{formatSpeech(s.seconds)}</time>
