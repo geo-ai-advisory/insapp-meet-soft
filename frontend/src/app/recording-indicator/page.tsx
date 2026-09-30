@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Pause, Play } from "lucide-react";
+import { formatClock } from "@/lib/meetingFormat";
 
 interface RecState {
   is_recording: boolean;
@@ -12,13 +14,16 @@ interface RecState {
 /**
  * Плавающий индикатор записи («пилюля»). Standalone-окно поверх всех приложений.
  *
- * ИСПРАВЛЕНИЕ БАГА:
- *  - Окно создаётся/закрывается из Rust по реальному состоянию записи (см. recording_indicator.rs),
- *    а не по фронтовым событиям.
- *  - Таймер и состояние ПАУЗЫ читаются из get_recording_state (active_duration исключает паузу) -
- *    пилюля не врёт и не отстаёт.
+ * Вид - как плашка записи на главном экране (дизайн «Экспрессив» в палитре «Воздушный», Geo 30.09:
+ * «пилюлю тоже обновить, чтобы визуально соответствовала приложению»): белая капсула с мягкой тенью,
+ * красные только точка записи, таймер и круглая «Стоп»; уровень звука - голубые полоски как у микрофона;
+ * «Пауза» - белая круглая кнопка с рамкой. На паузе точка и полоски замирают, таймер серый.
+ *
+ * Логика прежняя:
+ *  - Окно создаётся/закрывается из Rust по реальному состоянию записи (см. recording_indicator.rs).
+ *  - Таймер и пауза читаются из get_recording_state (active_duration без пауз).
  *  - ПАУЗА и СТОП шлют событие в главное окно (recording_indicator_toggle_pause / recording_indicator_stop),
- *    где отрабатывает ТОТ ЖЕ путь, что и у основного UI - единый источник истины.
+ *    где отрабатывает ТОТ ЖЕ путь, что и у основного UI.
  */
 export default function RecordingIndicatorPage() {
   const [elapsed, setElapsed] = useState(0);
@@ -26,13 +31,11 @@ export default function RecordingIndicatorPage() {
   const stoppingRef = useRef(false);
 
   useEffect(() => {
-    // Непрозрачный тёмный фон окна (прозрачные окна в этом приложении рендерятся пустыми).
+    // Фон окна прозрачный: видна только капсула с тенью (окно больше капсулы - запас под тень).
     const styleEl = document.createElement("style");
     styleEl.textContent = `
       html, body { background: transparent !important; margin: 0; padding: 0; overflow: hidden; height: 100vh; width: 100vw; }
       #__next, body > div { background: transparent !important; height: 100vh; }
-      @keyframes pill-ring { 0%,100% { transform: scale(1); opacity: 0.55; } 50% { transform: scale(1.18); opacity: 0; } }
-      @keyframes pill-bar  { 0%,100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
     `;
     document.head.appendChild(styleEl);
 
@@ -49,12 +52,6 @@ export default function RecordingIndicatorPage() {
     const id = setInterval(poll, 500);
     return () => { alive = false; clearInterval(id); try { document.head.removeChild(styleEl); } catch (_) {} };
   }, []);
-
-  const mmss = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
-  };
 
   const handleStop = async () => {
     if (stoppingRef.current) return;
@@ -73,83 +70,55 @@ export default function RecordingIndicatorPage() {
     try { await invoke("recording_indicator_toggle_pause"); } catch (e) { console.error("[insapp-meet] pill: ошибка паузы", e); }
   };
 
-  const accent = paused ? "#F59E0B" : "#EF4444"; // янтарь на паузе, красный в записи
+  const clock = formatClock(elapsed);
+  const long = clock.length > 5; // больше часа: «1:02:03»
 
   return (
-    <div
-      data-tauri-drag-region
-      style={{ width: "100vw", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box", padding: "0", background: "transparent" }}
-    >
+    <div data-tauri-drag-region className="flex h-screen w-screen select-none items-center justify-center bg-transparent font-sans">
       <div
         data-tauri-drag-region
-        style={{
-          width: "54px", height: "198px",
-          background: "linear-gradient(180deg, #2A2A2E 0%, #1A1A1C 100%)",
-          border: "1px solid rgba(255,255,255,0.10)", borderRadius: "27px",
-          boxShadow: "0 6px 18px rgba(0,0,0,0.42), 0 2px 6px rgba(0,0,0,0.28)",
-          cursor: "grab",
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 0", WebkitUserSelect: "none", userSelect: "none",
-        }}
+        role="group"
+        aria-label={paused ? "Запись на паузе" : "Идёт запись"}
+        className={`flex w-14 cursor-grab flex-col items-center rounded-[28px] bg-white pb-[9px] pt-3.5 shadow-[0_8px_24px_rgba(16,24,40,.13),0_2px_6px_rgba(16,24,40,.08),inset_0_0_0_1px_rgba(16,24,40,.06)] ${paused ? "im-paused" : ""}`}
       >
-        {/* Микрофон в круге + пульсирующее кольцо (нет пульса на паузе) */}
-        <div style={{ position: "relative", width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {!paused && (
-            <span style={{ position: "absolute", width: "28px", height: "28px", borderRadius: "50%", border: `2px solid ${accent}`, animation: "pill-ring 1.6s ease-out infinite" }} />
-          )}
-          <span style={{ width: "20px", height: "20px", borderRadius: "50%", background: accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="2" width="6" height="11" rx="3" fill="#fff" stroke="none" />
-              <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
-              <line x1="12" y1="19" x2="12" y2="22" />
-            </svg>
-          </span>
-        </div>
-
-        {/* Уровень: 4 столбика (замирают на паузе) */}
-        <div style={{ display: "flex", alignItems: "center", gap: "3px", height: "26px" }}>
-          {[0, 1, 2, 3].map((i) => (
-            <span key={i} style={{
-              width: "3.5px", height: "20px", borderRadius: "2px", background: accent, transformOrigin: "center",
-              animation: paused ? "none" : `pill-bar 0.9s ease-in-out ${i * 0.13}s infinite`,
-              transform: paused ? "scaleY(0.4)" : undefined, opacity: paused ? 0.5 : 1,
-            }} />
-          ))}
-        </div>
-
-        {/* Таймер (активное время, без паузы) */}
-        <div style={{ fontFamily: "Inter, -apple-system, system-ui, sans-serif", fontVariantNumeric: "tabular-nums", fontSize: "11px", fontWeight: 600, color: "#F5F5F7", letterSpacing: "0.01em" }}>
-          {mmss(elapsed)}
-        </div>
-
-        {/* Пауза / возобновление */}
-        <button
-          onClick={handlePause}
-          aria-label={paused ? "Возобновить запись" : "Пауза записи"}
-          title={paused ? "Возобновить" : "Пауза"}
-          style={{ width: "32px", height: "32px", borderRadius: "9px", border: "none", cursor: "pointer", background: "rgba(255,255,255,0.10)", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 120ms" }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.10)"; }}
+        {/* Точка записи и таймер - красные, как на плашке записи */}
+        <i data-tauri-drag-region className="im-rdot block h-2 w-2 flex-none rounded-full bg-im-rec" aria-hidden="true" />
+        <time
+          data-tauri-drag-region
+          className={`mt-2 font-semibold leading-[18px] im-num ${long ? "text-[11px]" : "text-[13.5px]"} ${paused ? "text-im-mut" : "text-im-rec-text"}`}
+          aria-label="Длительность записи"
         >
-          {paused ? (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="#fff" stroke="none"><path d="M7 4l13 8-13 8z" /></svg>
-          ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="#fff" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-          )}
+          {clock}
+        </time>
+        <span data-tauri-drag-region className={`h-4 text-[10.5px] font-semibold leading-4 text-im-mut ${paused ? "" : "invisible"}`}>
+          пауза
+        </span>
+
+        {/* Уровень звука: голубые полоски, на паузе замирают */}
+        <span data-tauri-drag-region className={`im-lvl mt-1 inline-flex h-4 items-center gap-[3px] [&>i:nth-child(4)]:[animation-delay:-.2s] [&>i]:w-[3px] [&>i]:rounded-full ${paused ? "text-im-dotm" : "text-im-data"}`} aria-hidden="true">
+          <i /><i /><i /><i />
+        </span>
+
+        {/* Пауза / продолжить - белая круглая с рамкой */}
+        <button
+          type="button"
+          onClick={handlePause}
+          aria-label={paused ? "Продолжить запись" : "Пауза записи"}
+          title={paused ? "Продолжить" : "Пауза"}
+          className="mt-3.5 grid h-9 w-9 place-items-center rounded-full bg-white text-im-ink2 shadow-[inset_0_0_0_1px_var(--im-line2)] transition-[background,border-radius] duration-200 hover:bg-im-hover active:rounded-xl"
+        >
+          {paused ? <Play className="h-4 w-4 translate-x-px" fill="currentColor" strokeWidth={0} /> : <Pause className="h-4 w-4" fill="currentColor" strokeWidth={0} />}
         </button>
 
-        {/* СТОП */}
+        {/* Стоп - круглая красная, как в плашке записи */}
         <button
+          type="button"
           onClick={handleStop}
           aria-label="Остановить запись"
           title="Остановить запись"
-          style={{ width: "34px", height: "34px", borderRadius: "11px", border: "none", cursor: "pointer", background: accent, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(239,68,68,0.45)", transition: "transform 120ms ease-out, filter 120ms ease-out" }}
-          onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(1.1)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
-          onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.92)"; }}
-          onMouseUp={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+          className="mt-2 grid h-[38px] w-[38px] place-items-center rounded-full bg-im-rec text-white shadow-[0_3px_8px_rgba(205,35,20,.35),inset_0_1px_0_rgba(255,255,255,.25)] transition-[transform,background] duration-200 hover:scale-[1.04] hover:bg-im-rec-h active:scale-95"
         >
-          <span style={{ width: "12px", height: "12px", borderRadius: "3px", background: "#fff" }} />
+          <span className="block h-3.5 w-3.5 rounded-[3px] bg-white" />
         </button>
       </div>
     </div>
