@@ -1390,13 +1390,19 @@ fn summary_attempts(settings: &AiSummarySettings, transcript_dir: &str, memory_d
 const SPELLING_PROMPT: &str = "Ниже протокол встречи. Расшифровка делалась на слух, поэтому имена людей, названия компаний, \
 партнёров, продуктов и термины могли исказиться. Сверь каждое такое название с твоей памятью и инструкциями \
 (CLAUDE.md, AGENTS.md, память проекта, списки правильного написания) и исправь написание. Больше ничего не меняй: \
-ни слова, ни структуру, ни форматирование. Выведи только исправленный протокол.\n\n";
+ни слова, ни структуру, ни форматирование. Выведи исправленный протокол целиком между строками <<<ПРОТОКОЛ \
+и ПРОТОКОЛ>>>, без вступления и пояснений.\n\n";
 
 /// Исправленный протокол - или прежний, если сверка не удалась или ответ подозрительно другой по длине.
 async fn fix_spelling_by_memory(a: &CliAttempt, protocol: &str, track_pid: bool) -> String {
     let prompt = format!("{}{}", SPELLING_PROMPT, protocol);
     match run_cli_attempt(a, &prompt, track_pid).await {
-        Ok(fixed) => {
+        Ok(answer) => {
+            // Берём только текст между метками: модель любит добавить «Исправленный протокол (...):» сверху.
+            let Some(fixed) = between_markers(&answer) else {
+                log::warn!("[ai-summary] сверка по памяти ответила без меток - оставляю исходный протокол");
+                return protocol.to_string();
+            };
             let (was, now) = (protocol.chars().count() as f64, fixed.chars().count() as f64);
             if now >= was * 0.8 && now <= was * 1.2 {
                 fixed
@@ -1410,6 +1416,14 @@ async fn fix_spelling_by_memory(a: &CliAttempt, protocol: &str, track_pid: bool)
             protocol.to_string()
         }
     }
+}
+
+/// Текст между строками <<<ПРОТОКОЛ и ПРОТОКОЛ>>> (без самих меток); None - меток нет или внутри пусто.
+fn between_markers(answer: &str) -> Option<String> {
+    let start = answer.find("<<<ПРОТОКОЛ")? + "<<<ПРОТОКОЛ".len();
+    let end = answer[start..].rfind("ПРОТОКОЛ>>>")? + start;
+    let text = answer[start..end].trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 /// Запустить CLI неинтерактивно и получить markdown резюме из stdout.
@@ -1921,12 +1935,28 @@ mod summary_job_tests {
         let dir = temp_dir("spell");
         let cli = fake_cli(
             &dir,
-            r#"p=$(cat); case "$p" in *"Больше ничего не меняй"*) echo 'ок';; *) echo '# Протокол встречи'; echo '- Памбаду даёт вдвое больше трафика';; esac"#,
+            r#"p=$(cat); case "$p" in *"Больше ничего не меняй"*) echo 'ок, вот'; echo '<<<ПРОТОКОЛ'; echo 'ок'; echo 'ПРОТОКОЛ>>>';; *) echo '# Протокол встречи'; echo '- Памбаду даёт вдвое больше трафика';; esac"#,
         );
         let transcript = dir.join("transcript.txt");
         std::fs::write(&transcript, "Вы: привет").unwrap();
         let out = run_cli_once(&settings_for(&cli), &transcript, "t", false).await.unwrap();
         assert_eq!(out, "# Протокол встречи\n- Памбаду даёт вдвое больше трафика");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Сверка по памяти: вступление модели отрезается, берётся только протокол между метками.
+    #[tokio::test]
+    async fn spelling_pass_takes_text_between_markers() {
+        let dir = temp_dir("markers");
+        let cli = fake_cli(
+            &dir,
+            r#"p=$(cat); case "$p" in *"Больше ничего не меняй"*) echo 'Исправленный протокол (Пампаду вместо Памбаду):'; echo; echo '<<<ПРОТОКОЛ'; echo '# Протокол встречи'; echo '- Пампаду даёт вдвое больше трафика'; echo 'ПРОТОКОЛ>>>';; *) echo '# Протокол встречи'; echo '- Памбаду даёт вдвое больше трафика';; esac"#,
+        );
+        let transcript = dir.join("transcript.txt");
+        std::fs::write(&transcript, "Вы: привет").unwrap();
+        let out = run_cli_once(&settings_for(&cli), &transcript, "t", false).await.unwrap();
+        assert_eq!(out, "# Протокол встречи\n- Пампаду даёт вдвое больше трафика");
+        assert_eq!(between_markers("без меток"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
