@@ -1311,6 +1311,8 @@ struct CliAttempt {
     /// Папка запуска: None - как у приложения.
     cwd: Option<PathBuf>,
     label: &'static str,
+    /// Запуск с памятью пользователя - после него сверка имён и терминов по памяти.
+    with_memory: bool,
 }
 
 /// Попытки запуска: сначала «с памятью пользователя», при быстром отказе - прежний режим без неё.
@@ -1361,8 +1363,8 @@ fn summary_attempts(settings: &AiSummarySettings, transcript_dir: &str, memory_d
                 "Read".to_string(),
             ]);
             vec![
-                CliAttempt { cmd: settings.command.clone(), args: memory, cwd: home_or_memory, label: "с памятью" },
-                CliAttempt { cmd: settings.command.clone(), args: plain, cwd: None, label: "без памяти" },
+                CliAttempt { cmd: settings.command.clone(), args: memory, cwd: home_or_memory, label: "с памятью", with_memory: true },
+                CliAttempt { cmd: settings.command.clone(), args: plain, cwd: None, label: "без памяти", with_memory: false },
             ]
         }
         // codex: exec - неинтерактивный режим. ~/.codex/AGENTS.md он читает сам, AGENTS.md проекта - из папки
@@ -1373,10 +1375,40 @@ fn summary_attempts(settings: &AiSummarySettings, transcript_dir: &str, memory_d
                 args: vec!["exec".to_string(), "--skip-git-repo-check".to_string()],
                 cwd: home_or_memory,
                 label: "с памятью",
+                with_memory: true,
             },
-            CliAttempt { cmd: settings.command.clone(), args: vec!["exec".to_string()], cwd: None, label: "без памяти" },
+            CliAttempt { cmd: settings.command.clone(), args: vec!["exec".to_string()], cwd: None, label: "без памяти", with_memory: false },
         ],
-        _ => vec![CliAttempt { cmd: settings.command.clone(), args: settings.args.clone(), cwd: None, label: "свой инструмент" }],
+        _ => vec![CliAttempt { cmd: settings.command.clone(), args: settings.args.clone(), cwd: None, label: "свой инструмент", with_memory: false }],
+    }
+}
+
+/// Вторым проходом - сверка имён и терминов по памяти пользователя.
+/// В одном большом запросе (протокол по длинной расшифровке) модель правила написание через раз; отдельная короткая
+/// просьба «исправь написание по памяти, больше ничего не меняй» правит стабильно (30.09, встреча по продажам 29.09:
+/// «Памбаду» -> Пампаду, InSmart -> Inssmart, «Гроз КВ» -> gross КВ, «Инсап Рейд» -> net-маржа).
+const SPELLING_PROMPT: &str = "Ниже протокол встречи. Расшифровка делалась на слух, поэтому имена людей, названия компаний, \
+партнёров, продуктов и термины могли исказиться. Сверь каждое такое название с твоей памятью и инструкциями \
+(CLAUDE.md, AGENTS.md, память проекта, списки правильного написания) и исправь написание. Больше ничего не меняй: \
+ни слова, ни структуру, ни форматирование. Выведи только исправленный протокол.\n\n";
+
+/// Исправленный протокол - или прежний, если сверка не удалась или ответ подозрительно другой по длине.
+async fn fix_spelling_by_memory(a: &CliAttempt, protocol: &str, track_pid: bool) -> String {
+    let prompt = format!("{}{}", SPELLING_PROMPT, protocol);
+    match run_cli_attempt(a, &prompt, track_pid).await {
+        Ok(fixed) => {
+            let (was, now) = (protocol.chars().count() as f64, fixed.chars().count() as f64);
+            if now >= was * 0.8 && now <= was * 1.2 {
+                fixed
+            } else {
+                log::warn!("[ai-summary] сверка по памяти вернула текст другой длины ({} -> {}) - оставляю исходный", was, now);
+                protocol.to_string()
+            }
+        }
+        Err(e) => {
+            log::warn!("[ai-summary] сверка по памяти не удалась: {} - оставляю исходный протокол", e);
+            protocol.to_string()
+        }
     }
 }
 
@@ -1391,8 +1423,9 @@ async fn run_cli_once(
         "{}\n\nРЕЖИМ: резюме делается в фоне, собеседника нет. Выведи ТОЛЬКО готовый протокол - \
          без вопросов, предложений правок и фраз вроде «готов доработать».\n\n\
          ПАМЯТЬ: расшифровка сделана на слух и искажает имена людей, названия компаний, партнёров, продуктов \
-         и термины. Пиши их так, как они записаны в твоей памяти и инструкциях (CLAUDE.md, AGENTS.md, память \
-         проекта); если там их нет - восстанавливай по смыслу. Правила из памяти о формате ответов в чате \
+         и термины - даже написанные латиницей. Сверь каждое такое название с твоей памятью и инструкциями \
+         (CLAUDE.md, AGENTS.md, память проекта, в том числе списки правильного написания) и пиши как там; \
+         если там их нет - восстанавливай по смыслу. Правила из памяти о формате ответов в чате \
          к протоколу не относятся: формат задаёт этот запрос.",
         settings
             .prompt_template
@@ -1416,6 +1449,9 @@ async fn run_cli_once(
                     a.label,
                     a.cwd.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "приложения".to_string())
                 );
+                if a.with_memory {
+                    return Ok(fix_spelling_by_memory(a, &text, track_pid).await);
+                }
                 return Ok(text);
             }
             Err(e) => {
@@ -1798,7 +1834,7 @@ mod summary_job_tests {
         let cli = fake_cli(
             &dir,
             &format!(
-                r#"printf '%s\n' "$@" > "{d}/args.txt"; cat > "{d}/prompt.txt"; echo '# Протокол'; echo '- итог встречи'"#,
+                r#"n=$(ls "{d}"/prompt*.txt 2>/dev/null | wc -l | tr -d ' '); printf '%s\n' "$@" > "{d}/args$n.txt"; cat > "{d}/prompt$n.txt"; echo '# Протокол'; echo '- итог встречи'"#,
                 d = dir.display()
             ),
         );
@@ -1808,12 +1844,16 @@ mod summary_job_tests {
         let out = run_cli_once(&settings_for(&cli), &transcript, "Синк с продуктом", false).await.unwrap();
         assert_eq!(out, "# Протокол\n- итог встречи");
 
-        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt")).unwrap().lines().map(String::from).collect();
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args0.txt")).unwrap().lines().map(String::from).collect();
         assert!(args.contains(&"--print".to_string()), "нет --print: {:?}", args);
         let i = args.iter().position(|a| a == "--model").expect("нет --model");
         assert_eq!(args[i + 1], "sonnet");
 
-        let prompt = std::fs::read_to_string(dir.join("prompt.txt")).unwrap();
+        // Второй вызов - сверка имён и терминов по памяти: в нём сам протокол и просьба ничего больше не менять.
+        let check = std::fs::read_to_string(dir.join("prompt1.txt")).expect("нет сверки по памяти");
+        assert!(check.contains("Больше ничего не меняй") && check.contains("- итог встречи"));
+
+        let prompt = std::fs::read_to_string(dir.join("prompt0.txt")).unwrap();
         // Название встречи идёт в Claude первой строкой файла расшифровки (prepare_transcript_file),
         // в самом промпте его нет - проверяем путь к файлу.
         assert!(prompt.contains(&transcript.to_string_lossy().to_string()), "в промпте нет пути к расшифровке");
@@ -1872,6 +1912,21 @@ mod summary_job_tests {
         assert_eq!(out, "# Протокол без памяти");
         let args = std::fs::read_to_string(dir.join("args.txt")).unwrap();
         assert!(args.contains("project,local"), "второй запуск - прежний режим: {}", args);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Сверка по памяти ответила чем-то другим (обрезала, раздула) - оставляем исходный протокол.
+    #[tokio::test]
+    async fn broken_spelling_pass_keeps_original_protocol() {
+        let dir = temp_dir("spell");
+        let cli = fake_cli(
+            &dir,
+            r#"p=$(cat); case "$p" in *"Больше ничего не меняй"*) echo 'ок';; *) echo '# Протокол встречи'; echo '- Памбаду даёт вдвое больше трафика';; esac"#,
+        );
+        let transcript = dir.join("transcript.txt");
+        std::fs::write(&transcript, "Вы: привет").unwrap();
+        let out = run_cli_once(&settings_for(&cli), &transcript, "t", false).await.unwrap();
+        assert_eq!(out, "# Протокол встречи\n- Памбаду даёт вдвое больше трафика");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
