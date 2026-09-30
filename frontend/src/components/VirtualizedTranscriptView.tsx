@@ -251,18 +251,31 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const [renamingKey, setRenamingKey] = useState<string | null>(null);
     const [renameValue, setRenameValue] = useState('');
 
+    // Имя - на все метки голоса этого человека (слитые голоса с той же подписью), иначе после
+    // переименования слитый голос снова отделился бы.
     const saveSpeakerName = useCallback(async (key: string, name: string) => {
         setRenamingKey(null);
-        await names.saveName(key, name);
-    }, [names]);
+        const label = names.labelFor(key);
+        const keys = new Set<string>([key]);
+        for (const seg of segments) {
+            const sp = (seg as any).speaker as string | undefined;
+            if (sp && sp !== 'mic' && names.labelFor(sp) === label) keys.add(sp);
+        }
+        for (const k of keys) await names.saveName(k, name);
+    }, [names, segments]);
 
     // Слить голос с уже известным участником (Geo 30.09: в разговоре один на один речь собеседника
     // местами уходит в других «Собеседников»): «Вы» и имена, уже данные другим голосам.
     const mergeTargetsFor = useCallback((key: string) => {
-        const own = (names.names[key] || '').trim().toLowerCase();
+        const own = (names.labelFor(key) || '').trim().toLowerCase();
         const seen = new Set<string>();
         const out: string[] = [];
-        for (const n of [ME_LABEL, ...Object.entries(names.names).filter(([k]) => k !== key).map(([, v]) => v)]) {
+        const others = new Set<string>();
+        for (const seg of segments) {
+            const sp = (seg as any).speaker as string | undefined;
+            if (sp && sp !== 'mic' && sp !== key) others.add(names.labelFor(sp) || '');
+        }
+        for (const n of [ME_LABEL, ...Object.entries(names.names).filter(([k]) => k !== key).map(([, v]) => v), ...others]) {
             const t = (n || '').trim();
             const low = t.toLowerCase();
             if (!t || low === own || seen.has(low)) continue;
@@ -270,7 +283,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             out.push(t);
         }
         return out;
-    }, [names.names]);
+    }, [names, segments]);
 
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);

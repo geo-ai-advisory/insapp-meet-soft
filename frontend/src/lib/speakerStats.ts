@@ -90,6 +90,11 @@ export const ME_LABEL = 'Вы';
  */
 export const MIN_VISIBLE_SHARE = 0.03;
 
+/** «Собеседник» / «Собеседник 2» - автоподпись, а не имя: так бывает после слияния с безымянным голосом. */
+export function isAutoLabel(name?: string | null): boolean {
+  return /^Собеседник(\s+\d+)?$/.test((name || '').trim());
+}
+
 /** Голоса одного человека (одинаковая подпись) - одной строкой: секунды и реплики складываются. */
 export interface MergedStat extends SpeakerStat {
   /** Все метки голоса этого человека; key - главная (у «Вы» - микрофон). */

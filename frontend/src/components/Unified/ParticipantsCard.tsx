@@ -138,7 +138,7 @@ export function ParticipantsCard({ participants, onRename }: {
               width={width}
               scale={scale}
               onRename={(name) => onRename(p.keys, name)}
-              suggestions={participants.filter((o) => o.key !== p.key && !o.unnamed).map((o) => o.label)}
+              suggestions={participants.filter((o) => o.key !== p.key).map((o) => o.label)}
             />
           ))}
         </ul>

@@ -100,8 +100,9 @@ pub async fn load_profiles(pool: &SqlitePool) -> Vec<(String, Vec<f32>)> {
     for (name, blob, sec) in rows {
         let shown = name.trim().to_string();
         let key = shown.to_lowercase();
-        // «Вы» у собеседника - его реплики слиты с вашими (эхо вашего голоса): это не голос коллеги.
-        if shown.is_empty() || key == "вы" {
+        // «Вы» у собеседника - его реплики слиты с вашими (эхо вашего голоса); «Собеседник N» - слит
+        // с безымянным голосом. Это не имена коллег - голоса под ними не запоминаем.
+        if shown.is_empty() || key == "вы" || key.starts_with("собеседник") {
             continue;
         }
         let c = from_blob(&blob);
@@ -298,7 +299,7 @@ pub async fn voices_list(state: tauri::State<'_, crate::state::AppState>) -> Res
         "SELECT sn.display_name, COUNT(DISTINCT mv.meeting_id), SUM(mv.seconds)
          FROM meeting_voices mv
          JOIN speaker_names sn ON sn.meeting_id = mv.meeting_id AND sn.speaker_key = mv.speaker_key
-         WHERE sn.speaker_key LIKE 'system%' AND trim(sn.display_name) NOT IN ('Вы', 'вы', 'ВЫ') -- lower() в SQLite не знает кириллицу
+         WHERE sn.speaker_key LIKE 'system%' AND trim(sn.display_name) NOT IN ('Вы', 'вы', 'ВЫ') AND trim(sn.display_name) NOT LIKE 'Собеседник%' -- lower() в SQLite не знает кириллицу
          GROUP BY lower(trim(sn.display_name)) ORDER BY SUM(mv.seconds) DESC",
     )
     .fetch_all(pool)

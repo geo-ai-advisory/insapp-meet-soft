@@ -45,7 +45,7 @@ import {
   daysAgo, formatDuration, formatKickDate, formatListWhen, hhmm, initialsOf, isFillerOnly, parseMeetingDate, plural,
   shortName, summaryMarkdownOf,
 } from '@/lib/meetingFormat';
-import { ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
+import { ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, isAutoLabel, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
 import { SummaryDocument, separateHeaderLines } from './SummaryDocument';
 import { Dot } from './primitives';
 import { ParticipantsCard, Participant } from './ParticipantsCard';
@@ -187,7 +187,7 @@ export function MeetingView({
   // и шум, в «Участниках» не показываем (Geo 30.09).
   const participants: Participant[] = useMemo(() => {
     const merged = mergeStatsByLabel(stats, names.labelFor);
-    const named = (keys: string[]) => keys.some((k) => !!names.names[k] || (k !== 'mic' && !/^system(_\d+)?$/.test(k)));
+    const named = (keys: string[]) => keys.some((k) => (!!names.names[k] && !isAutoLabel(names.names[k])) || (k !== 'mic' && !/^system(_\d+)?$/.test(k)));
     const visible = merged.filter((s) => s.key === 'mic' || named(s.keys) || s.share >= MIN_VISIBLE_SHARE);
     const pct = roundShares(visible);
     return [...visible]

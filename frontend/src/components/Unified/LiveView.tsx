@@ -15,7 +15,7 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { useSpeakerNames } from '@/hooks/useSpeakerNames';
 import { useSummaryReadiness } from '@/hooks/useSummaryJobs';
 import { defaultMeetingName, formatKickDate, initialsOf, isAutoMeetingTitle } from '@/lib/meetingFormat';
-import { MergedStat, ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, formatSpeech, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
+import { MergedStat, ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, formatSpeech, isAutoLabel, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
 import { Avatar, Dot, FlatBar, RecDot, Wave, useElementWidth } from './primitives';
 
 export type LiveKind = 'in' | 'out';
@@ -70,15 +70,16 @@ export function LiveView({
   // Участники: «Вы» всегда первым, дальше - в порядке первой реплики. Голоса с одним именем - один
   // человек (слитые вручную: «Это Саша»). Безымянные с долей меньше 3% не показываем - это осколки и шум.
   const merged = useMemo(() => mergeStatsByLabel(stats, names.labelFor), [stats, names.labelFor]);
-  const isNamed = (s: MergedStat) => s.keys.some((k) => !!names.names[k] || (k !== 'mic' && !/^system(_\d+)?$/.test(k)));
+  const isNamed = (s: MergedStat) => s.keys.some((k) => (!!names.names[k] && !isAutoLabel(names.names[k])) || (k !== 'mic' && !/^system(_\d+)?$/.test(k)));
   const others = merged.filter((s) => s.key !== 'mic').sort((a, b) => a.firstIndex - b.firstIndex);
   const me = merged.find((s) => s.key === 'mic');
   const known = others.filter(isNamed);
   const unknown = others.filter((s) => !isNamed(s) && s.share >= MIN_VISIBLE_SHARE);
   const count = 1 + known.length + unknown.length;
   const speakingIn = (s?: MergedStat) => !!speakingKey && !!s && s.keys.includes(speakingKey);
-  // Кому можно отдать реплики безымянного голоса: вы и уже известные участники.
-  const mergeTargets = [ME_LABEL, ...known.map((k) => names.labelFor(k.key) || '').filter(Boolean)];
+  // Кому можно отдать реплики безымянного голоса: вы и остальные видимые участники (в разговоре один
+  // на один, пока никто не назван, «Собеседник 2» сливается с «Собеседник 1»).
+  const mergeTargets = [ME_LABEL, ...[...known, ...unknown].map((k) => names.labelFor(k.key) || '').filter(Boolean)];
   const mergeInto = async (from: MergedStat, label: string) => {
     const was = names.labelFor(from.key) || 'Собеседник';
     for (const k of from.keys) await names.saveName(k, label);
@@ -236,7 +237,7 @@ export function LiveView({
               label={names.labelFor(s.key) || 'Собеседник'}
               lastText={s.lastText}
               speaking={speakingIn(s)}
-              targets={mergeTargets}
+              targets={mergeTargets.filter((t) => t !== (names.labelFor(s.key) || 'Собеседник'))}
               onMerge={(label) => mergeInto(s, label)}
               inputRef={(el) => { nameInputs.current[s.key] = el; }}
               onSave={async (name) => {
