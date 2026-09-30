@@ -73,10 +73,6 @@ const NEW_SPEAKER_MIN_SEC: f32 = 3.0;
 /// собеседнику: это почти всегда продолжение его же реплики.
 const MIN_SEGMENT_SEC: f32 = 1.2;
 
-/// Сколько секунд после реплики собеседника короткие вставки считаем его
-/// продолжением. Больше паузы - вставку никому не приписываем.
-const STICKY_GUEST_SEC: f64 = 10.0;
-
 /// Различать собеседников между собой. Выключено - все чужие голоса идут одной
 /// подписью «Собеседник» (поведение без диаризации). Переключается из UI.
 static DIARIZE_GUESTS: AtomicBool = AtomicBool::new(true);
@@ -434,27 +430,19 @@ pub fn identify_speaker(samples: &[f32], sample_rate: u32, from_mic: bool, at_se
         None => return SpeakerRole::Unknown,
     };
 
-    // Короткая вставка («ага», «да») - отпечаток неустойчив. Приписываем
-    // последнему говорившему собеседнику, если он был недавно.
+    // Короткая вставка («ага», «да») - отпечаток неустойчив. Приписываем последнему
+    // говорившему собеседнику, даже если он молчал давно: отдельный «Собеседник» без имени
+    // из одной короткой реплики - мусор в списке участников (Geo 30.09: «это всё один человек»).
     let duration = samples.len() as f32 / sample_rate.max(1) as f32;
     if duration < MIN_SEGMENT_SEC {
-        if let Some((n, t)) = d.last_guest {
-            if now - t <= STICKY_GUEST_SEC {
-                d.last_guest = Some((n, now));
-                d.records.push(GuestRecord { at: now, dur: duration, emb: None, live: n });
-                return SpeakerRole::Guest(n);
-            }
-        }
-        d.records.push(GuestRecord { at: now, dur: duration, emb: None, live: 0 });
-        return SpeakerRole::Unknown;
+        return stick_to_last(d, now, duration);
     }
 
     let embedding = match d.model.embed(samples) {
         Some(e) => e,
         None => {
             warn!("[diarization] не посчитать отпечаток голоса");
-            d.records.push(GuestRecord { at: now, dur: duration, emb: None, live: 0 });
-            return SpeakerRole::Unknown;
+            return stick_to_last(d, now, duration);
         }
     };
 
@@ -491,6 +479,17 @@ pub fn identify_speaker(samples: &[f32], sample_rate: u32, from_mic: bool, at_se
     d.last_guest = Some((n, now));
     d.records.push(GuestRecord { at: now, dur: duration, emb: Some(embedding), live: n });
     SpeakerRole::Guest(n)
+}
+
+/// Реплика без надёжного отпечатка - последнему говорившему собеседнику; до первого собеседника - «Собеседник».
+fn stick_to_last(d: &mut Diarizer, now: f64, duration: f32) -> SpeakerRole {
+    if let Some((n, _)) = d.last_guest {
+        d.last_guest = Some((n, now));
+        d.records.push(GuestRecord { at: now, dur: duration, emb: None, live: n });
+        return SpeakerRole::Guest(n);
+    }
+    d.records.push(GuestRecord { at: now, dur: duration, emb: None, live: 0 });
+    SpeakerRole::Unknown
 }
 
 // ------------------------------------------------------------
@@ -630,15 +629,23 @@ pub(crate) fn relabel_impl(records: &[GuestRecord], protect_since: Option<f64>) 
     }
     let mut order: Vec<usize> = (0..records.len()).collect();
     order.sort_by(|&a, &b| records[a].at.partial_cmp(&records[b].at).unwrap_or(std::cmp::Ordering::Equal));
-    let mut last: Option<(usize, f64)> = None;
+    // Реплики без отпечатка - к предыдущему собеседнику (без окна по времени: отдельный безымянный
+    // «Собеседник» из коротких реплик - мусор), а те, что были до первого собеседника, - к первому.
+    let mut last: Option<usize> = None;
     for &i in &order {
         if label[i] > 0 {
-            last = Some((label[i], records[i].at));
-        } else if let Some((l, t)) = last {
-            if records[i].at - t <= STICKY_GUEST_SEC {
-                label[i] = l;
-                last = Some((l, records[i].at));
+            last = Some(label[i]);
+        } else if let Some(l) = last {
+            label[i] = l;
+        }
+    }
+    if let Some(&first) = order.iter().find(|&&i| label[i] > 0) {
+        let l = label[first];
+        for &i in &order {
+            if label[i] > 0 {
+                break;
             }
+            label[i] = l;
         }
     }
 

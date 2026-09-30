@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { isFillerOnly } from '@/lib/meetingFormat';
 import { invoke } from "@tauri-apps/api/core";
 import { Transcript, MeetingMetadata, PaginatedTranscriptsResponse, TranscriptSegmentData } from "@/types";
 
@@ -104,7 +105,9 @@ export function usePaginatedTranscripts({
                 }
             );
 
-            const newTranscripts = response.transcripts;
+            // Реплики из одних слов-паразитов («Uh.», «Um») не показываем; смещение страниц считаем
+            // по всем строкам базы, иначе следующая страница съехала бы.
+            const newTranscripts = response.transcripts.filter((t) => !isFillerOnly(t.text));
 
             if (append) {
                 setTranscripts(prev => {
@@ -122,7 +125,7 @@ export function usePaginatedTranscripts({
 
             setHasMore(response.has_more);
             setTotalCount(response.total_count);
-            offsetRef.current = offset + newTranscripts.length;
+            offsetRef.current = offset + response.transcripts.length;
 
             return newTranscripts;
         } catch (err) {

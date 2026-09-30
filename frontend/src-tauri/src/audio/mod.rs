@@ -15,6 +15,7 @@ pub mod device_detection;
 pub mod diagnostics;
 pub mod diarization;  // Распознавание говорящих внутри канала собеседников
 pub mod voices;       // Голоса коллег: имя из одной встречи узнаётся в следующих
+pub mod fillers;      // Реплики из одних слов-паразитов («Uh», «Um») - не сохраняем
 pub mod ffmpeg_mixer;  // NEW: FFmpeg-style adaptive audio mixer
 
 // New simplified audio system

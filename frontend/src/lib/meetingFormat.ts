@@ -233,3 +233,19 @@ export function summaryMarkdownOf(summary: any): string {
     .filter((s) => s.trim())
     .join('\n\n');
 }
+
+/**
+ * Реплика из одних слов-паразитов («Uh.», «Um», «Mm-hmm», «Э-э») - шум распознавания (Geo 30.09:
+ * «надо это убивать и не мусорить»). С 0.4.6 такие реплики не сохраняются; в старых встречах - скрываем.
+ * Тот же список, что в src-tauri/src/audio/fillers.rs.
+ */
+const FILLERS = new Set([
+  'uh', 'uhh', 'um', 'umm', 'uhm', 'hm', 'hmm', 'hmmm', 'mm', 'mmm', 'mhm', 'mmhmm', 'uhhuh',
+  'ah', 'ahh', 'eh', 'er', 'erm', 'oh',
+  'э', 'ээ', 'эээ', 'эм', 'м', 'мм', 'ммм', 'хм',
+]);
+export function isFillerOnly(text?: string | null): boolean {
+  const words = (text || '').toLowerCase().split(/[^\p{L}\p{N}-]+/u).map((w) => w.replace(/^-+|-+$/g, '')).filter(Boolean);
+  if (words.length === 0) return false;
+  return words.every((w) => FILLERS.has(w) || FILLERS.has(w.replace(/-/g, '')));
+}

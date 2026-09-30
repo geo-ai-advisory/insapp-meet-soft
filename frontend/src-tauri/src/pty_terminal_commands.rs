@@ -946,6 +946,10 @@ async fn prepare_transcript_file<R: Runtime>(
 
     let mut buf = format!("# {}\n\n", title);
     for (i, (text, ts, start, _end)) in rows.iter().enumerate() {
+        // Реплики из одних слов-паразитов («Uh.», «Um») резюме не нужны - это шум распознавания.
+        if crate::audio::fillers::is_filler_only(text) {
+            continue;
+        }
         let stamp = start
             .map(|s| {
                 let t = s as u64;

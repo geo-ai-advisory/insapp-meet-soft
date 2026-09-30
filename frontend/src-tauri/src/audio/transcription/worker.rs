@@ -146,26 +146,13 @@ pub fn start_transcription_task<R: Runtime>(
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
-                            // Источник речи для разметки спикера - сохраняем ДО перемещения
-                            // chunk в transcribe. "mic" = микрофон (Вы), "system" = система
-                            // (Собеседник). None - когда разделение спикеров выключено.
-                            // Кто говорит. Голос проверяем в ОБОИХ каналах: в онлайн-встрече
-                            // микрофон - это владелец, а в очной встрече в общий микрофон
-                            // попадают все, и там тоже нужно различать говорящих.
-                            let chunk_speaker: Option<String> = if crate::audio::pipeline::get_separate_speakers() {
-                                use crate::audio::diarization::SpeakerRole;
+                            // Разметка говорящего - ПОСЛЕ распознавания: реплика из одних слов-паразитов
+                            // («Uh.», «Um») не должна ни сохраняться, ни заводить нового собеседника (Geo 30.09).
+                            // Поэтому звук реплики системного канала сохраняем до передачи в распознавание
+                            // (микрофон - всегда «Вы», звук ему не нужен). None - разделение спикеров выключено.
+                            let diar_input: Option<(Option<Vec<f32>>, u32, bool, f64)> = if crate::audio::pipeline::get_separate_speakers() {
                                 let from_mic = matches!(chunk.device_type, RecordingDeviceType::Microphone);
-                                Some(match crate::audio::diarization::identify_speaker(
-                                    &chunk.data,
-                                    chunk.sample_rate,
-                                    from_mic,
-                                    chunk.timestamp,
-                                ) {
-                                    SpeakerRole::Owner => "mic".to_string(),
-                                    SpeakerRole::Guest(n) => format!("system_{}", n),
-                                    // Не распознали - общая подпись «Собеседник».
-                                    SpeakerRole::Unknown => "system".to_string(),
-                                })
+                                Some((if from_mic { None } else { Some(chunk.data.clone()) }, chunk.sample_rate, from_mic, chunk.timestamp))
                             } else {
                                 None
                             };
@@ -196,7 +183,12 @@ pub fn start_transcription_task<R: Runtime>(
                                     // Check confidence threshold (or accept if no confidence provided)
                                     let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
 
-                                    if !transcript.trim().is_empty() && meets_threshold {
+                                    let filler = crate::audio::fillers::is_filler_only(&transcript);
+                                    if filler {
+                                        info!("Worker {}: реплика из слов-паразитов '{}' - не сохраняю", worker_id, transcript);
+                                    }
+
+                                    if !transcript.trim().is_empty() && meets_threshold && !filler {
                                         // PERFORMANCE: Only log transcription results, not every processing step
                                         info!("✅ Worker {} transcribed: {} (confidence: {}, partial: {})",
                                               worker_id, transcript, confidence_str, is_partial);
@@ -231,6 +223,19 @@ pub fn start_transcription_task<R: Runtime>(
                                         // This decouples the transcription worker from direct RECORDING_MANAGER access
 
                                         // Emit transcript update with NEW recording-relative timestamps
+
+                                        // Кто говорит: микрофон - «Вы», системный звук - номер собеседника по голосу.
+                                        let chunk_speaker: Option<String> = diar_input.as_ref().map(|(data, sr, from_mic, at)| {
+                                            use crate::audio::diarization::SpeakerRole;
+                                            let empty: [f32; 0] = [];
+                                            let samples: &[f32] = data.as_deref().unwrap_or(&empty);
+                                            match crate::audio::diarization::identify_speaker(samples, *sr, *from_mic, *at) {
+                                                SpeakerRole::Owner => "mic".to_string(),
+                                                SpeakerRole::Guest(n) => format!("system_{}", n),
+                                                // Не распознали - общая подпись «Собеседник».
+                                                SpeakerRole::Unknown => "system".to_string(),
+                                            }
+                                        });
 
                                         let update = TranscriptUpdate {
                                             text: transcript,

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { isFillerOnly } from '@/lib/meetingFormat';
 import { Transcript, Summary } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -381,7 +382,7 @@ export function useSummaryGeneration({
       }) as { transcripts: Transcript[]; total_count: number; has_more: boolean };
 
       console.log(`✅ Fetched ${allData.transcripts.length} transcripts from database`);
-      return allData.transcripts;
+      return allData.transcripts.filter((t) => !isFillerOnly(t.text));
     } catch (error) {
       console.error('❌ Error fetching all transcripts:', error);
       toast.error('Failed to fetch transcripts for summary generation');
