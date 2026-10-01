@@ -311,6 +311,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         count: segments.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: () => 64, // Estimated height per message
+        // Высота запоминается за самой репликой, а не за её номером: при подгрузке страниц реплики
+        // сортируются по времени и встают в середину, номера сдвигаются - и прежние высоты доставались
+        // чужим репликам, реплики наезжали друг на друга (Geo 01.10: «бывает глючит наслоение»).
+        getItemKey: (index) => segments[index]?.id ?? index,
         overscan: 10, // Render extra items above/below viewport
         onChange: () => {
             startTransition(() => {
