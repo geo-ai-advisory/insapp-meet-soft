@@ -8,7 +8,7 @@
  */
 
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { Check, Copy, Pencil, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, Copy, Pencil, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
@@ -345,7 +345,14 @@ function UnknownSpeaker({
   );
 }
 
-/** «Кто сколько говорит»: полоска + % + минуты, у говорящего сейчас полоска-волна. */
+/** Сколько строк «Кто сколько говорит» видно без «Ещё N». */
+const TALK_LIMIT = 3;
+
+/**
+ * «Кто сколько говорит»: полоска + % + минуты, у говорящего сейчас полоска-волна.
+ * Всегда компактно - первые три по доле речи, остальные под «Ещё N» (Geo 02.10: блок рос на
+ * весь столбец и вытеснял «Участников», а имена важнее). Раскрытый список не выше половины экрана.
+ */
 function TalkCard({
   stats, speakingKey, elapsed, labelFor, isUnnamed, meInitials,
 }: {
@@ -357,19 +364,22 @@ function TalkCard({
   meInitials: string;
 }) {
   const { ref, width } = useElementWidth<HTMLDivElement>(276);
-  const rows = [...stats].sort((a, b) => b.share - a.share);
+  const [expanded, setExpanded] = useState(false);
+  const all = [...stats].sort((a, b) => b.share - a.share);
+  const hidden = Math.max(0, all.length - TALK_LIMIT);
+  const rows = expanded ? all : all.slice(0, TALK_LIMIT);
   const pct = roundShares(stats);
-  const maxShare = rows.reduce((a, s) => Math.max(a, s.share), 0);
+  const maxShare = all.reduce((a, s) => Math.max(a, s.share), 0);
   // Длина полоски - доля речи; шкала до 45%, чтобы разница между людьми читалась.
   const scale = Math.max(0.45, maxShare);
   const mins = Math.max(1, Math.round(elapsed / 60));
   return (
-    <section className="mt-2.5 flex-none rounded-[22px] bg-white px-4 pb-[18px] pt-4">
-      <h3 className="m-0 flex items-center gap-2 text-[14px] font-bold leading-5 text-im-ink">
+    <section className={`mt-2.5 flex min-h-0 flex-none flex-col rounded-[22px] bg-white px-4 pt-4 ${hidden > 0 ? 'pb-2.5' : 'pb-[18px]'}`}>
+      <h3 className="m-0 flex flex-none items-center gap-2 text-[14px] font-bold leading-5 text-im-ink">
         Кто сколько говорит
         <span className="ml-auto text-[12px] font-medium text-im-mut">за {mins} мин</span>
       </h3>
-      <div ref={ref}>
+      <div ref={ref} className={expanded ? 'im-scroll -mr-2 max-h-[46vh] overflow-y-auto pr-2' : ''}>
         {rows.length === 0 && <p className="mt-3 text-[12.5px] text-im-mut">Пока никто не говорил</p>}
         {rows.map((s) => {
           const isMe = s.key === 'mic';
@@ -394,6 +404,17 @@ function TalkCard({
           );
         })}
       </div>
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-2 inline-flex h-7 flex-none items-center gap-1 self-start rounded-lg text-[13px] font-semibold text-im-on-tone hover:underline hover:underline-offset-[3px]"
+          aria-expanded={expanded}
+        >
+          {expanded ? 'Свернуть' : `Ещё ${hidden}`}
+          <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+      )}
     </section>
   );
 }
