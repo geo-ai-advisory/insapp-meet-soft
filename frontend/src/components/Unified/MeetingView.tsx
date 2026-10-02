@@ -42,7 +42,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import Analytics from '@/lib/analytics';
 import {
-  daysAgo, formatDuration, formatKickDate, formatListWhen, hhmm, initialsOf, isFillerOnly, parseMeetingDate, plural,
+  daysAgo, formatDuration, formatKickDate, formatListWhen, hhmm, initialsOf, parseMeetingDate, plural, withoutNoise,
   shortName, summaryMarkdownOf,
 } from '@/lib/meetingFormat';
 import { ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, isAutoLabel, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
@@ -78,7 +78,7 @@ function useAllSegments(meetingId: string, segments: TranscriptSegmentData[], ha
     invoke<{ transcripts: any[] }>('api_get_meeting_transcripts', { meetingId, limit: totalCount, offset: 0 })
       .then((res) => {
         if (!alive || !res?.transcripts) return;
-        setAll(res.transcripts.filter((t: any) => !isFillerOnly(t.text)).map((t: any) => ({
+        setAll(withoutNoise(res.transcripts as any[]).map((t: any) => ({
           id: t.id, timestamp: t.audio_start_time ?? 0, endTime: t.audio_end_time, text: t.text,
           confidence: t.confidence, speaker: t.speaker,
         })));

@@ -249,3 +249,34 @@ export function isFillerOnly(text?: string | null): boolean {
   if (words.length === 0) return false;
   return words.every((w) => FILLERS.has(w) || FILLERS.has(w.replace(/-/g, '')));
 }
+
+/**
+ * Короткий обрывок не кириллицей: 1-2 слова без цифр, до 14 букв («In», «Him.», «Yeah.», «The», «No.»).
+ * В русской встрече это шум или «да / ну / окей», записанные по-английски (Geo 02.10: «мелкие
+ * артефакты, их можно убирать как грязь»). Тот же разбор, что в src-tauri/src/audio/fillers.rs.
+ */
+export function isLatinSnippet(text?: string | null): boolean {
+  const t = (text || '').trim();
+  if (!t || /[Ѐ-ӿ0-9]/.test(t)) return false;
+  const words = t.split(/[^\p{L}']+/u).filter((w) => /\p{L}/u.test(w)).length;
+  const letters = (t.match(/\p{L}/gu) || []).length;
+  return words >= 1 && words <= 2 && letters <= 14;
+}
+
+/** Встреча по-русски: из непустых реплик хотя бы в 60% есть кириллица (и реплик не меньше пяти). */
+export function isRussianMeeting(texts: (string | null | undefined)[]): boolean {
+  let total = 0;
+  let ru = 0;
+  for (const t of texts) {
+    if (!t || !t.trim()) continue;
+    total += 1;
+    if (/[Ѐ-ӿ]/.test(t)) ru += 1;
+  }
+  return total >= 5 && ru * 10 >= total * 6;
+}
+
+/** Убрать шум распознавания: слова-паразиты, а в русской встрече - и короткие обрывки латиницей. */
+export function withoutNoise<T extends { text?: string | null }>(items: T[]): T[] {
+  const russian = isRussianMeeting(items.map((t) => t.text));
+  return items.filter((t) => !isFillerOnly(t.text) && !(russian && isLatinSnippet(t.text)));
+}

@@ -1,5 +1,5 @@
 import { useCallback, RefObject } from 'react';
-import { isFillerOnly } from '@/lib/meetingFormat';
+import { withoutNoise } from '@/lib/meetingFormat';
 import { Transcript, Summary } from '@/types';
 import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { toast } from 'sonner';
@@ -50,7 +50,7 @@ export function useCopyOperations({
       }) as { transcripts: Transcript[]; total_count: number; has_more: boolean };
 
       console.log(`✅ Fetched ${allData.transcripts.length} transcripts from database for copying`);
-      return allData.transcripts.filter((t) => !isFillerOnly(t.text));
+      return withoutNoise(allData.transcripts);
     } catch (error) {
       console.error('❌ Error fetching all transcripts:', error);
       toast.error('Не удалось получить расшифровку для копирования');

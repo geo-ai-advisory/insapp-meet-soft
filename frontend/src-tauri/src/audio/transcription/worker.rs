@@ -17,9 +17,16 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+// Сколько реплик этой записи и сколько из них по-русски - чтобы короткие обрывки латиницей
+// («In», «Yeah.») выбрасывать только в русской встрече (см. fillers::is_latin_snippet).
+static LINES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LINES_RUSSIAN: AtomicU64 = AtomicU64::new(0);
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
+    LINES_TOTAL.store(0, Ordering::SeqCst);
+    LINES_RUSSIAN.store(0, Ordering::SeqCst);
     info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 }
 
@@ -183,9 +190,23 @@ pub fn start_transcription_task<R: Runtime>(
                                     // Check confidence threshold (or accept if no confidence provided)
                                     let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
 
-                                    let filler = crate::audio::fillers::is_filler_only(&transcript);
+                                    let mut filler = crate::audio::fillers::is_filler_only(&transcript);
                                     if filler {
                                         info!("Worker {}: реплика из слов-паразитов '{}' - не сохраняю", worker_id, transcript);
+                                    } else if !transcript.trim().is_empty() {
+                                        // Короткий обрывок латиницей в русской встрече - тоже мусор (Geo 02.10: «In»).
+                                        let total = LINES_TOTAL.fetch_add(1, Ordering::SeqCst) + 1;
+                                        let ru = if crate::audio::fillers::has_cyrillic(&transcript) {
+                                            LINES_RUSSIAN.fetch_add(1, Ordering::SeqCst) + 1
+                                        } else {
+                                            LINES_RUSSIAN.load(Ordering::SeqCst)
+                                        };
+                                        if crate::audio::fillers::is_latin_snippet(&transcript)
+                                            && crate::audio::fillers::is_russian_context(ru, total)
+                                        {
+                                            info!("Worker {}: обрывок латиницей '{}' в русской встрече - не сохраняю", worker_id, transcript);
+                                            filler = true;
+                                        }
                                     }
 
                                     if !transcript.trim().is_empty() && meets_threshold && !filler {

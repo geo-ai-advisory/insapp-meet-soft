@@ -983,9 +983,16 @@ async fn prepare_transcript_file<R: Runtime>(
     .unwrap_or_default();
 
     let mut buf = format!("# {}\n\n", title);
+    // Русская ли встреча - чтобы выбросить короткие обрывки латиницей («In», «Yeah.»).
+    let nonempty: Vec<&String> = rows.iter().map(|r| &r.0).filter(|t| !t.trim().is_empty()).collect();
+    let russian = crate::audio::fillers::is_russian_context(
+        nonempty.iter().filter(|t| crate::audio::fillers::has_cyrillic(t)).count() as u64,
+        nonempty.len() as u64,
+    );
     for (i, (text, ts, start, _end)) in rows.iter().enumerate() {
-        // Реплики из одних слов-паразитов («Uh.», «Um») резюме не нужны - это шум распознавания.
-        if crate::audio::fillers::is_filler_only(text) {
+        // Реплики из одних слов-паразитов («Uh.», «Um») и обрывки латиницей в русской встрече
+        // резюме не нужны - это шум распознавания.
+        if crate::audio::fillers::is_filler_only(text) || (russian && crate::audio::fillers::is_latin_snippet(text)) {
             continue;
         }
         let stamp = start
