@@ -21,6 +21,8 @@ interface TranscriptContextType {
   clearTranscripts: () => void;
   currentMeetingId: string | null;
   markMeetingAsSaved: () => Promise<void>;
+  /** «Удалить запись»: встреча не сохраняется - убрать её из восстановления и с экрана. */
+  discardCurrentMeeting: () => Promise<void>;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -561,6 +563,22 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, [currentMeetingId]);
 
+  // «Удалить запись» в окне сохранения: встречу не сохраняем - убираем её и из восстановления
+  // прерванных записей (иначе при следующем запуске предложило бы её «восстановить»).
+  const discardCurrentMeeting = useCallback(async () => {
+    const meetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+    if (meetingId) {
+      try {
+        await indexedDBService.deleteMeeting(meetingId);
+      } catch (error) {
+        console.error('[IndexedDB] не удалось убрать удалённую запись из восстановления', error);
+      }
+    }
+    setCurrentMeetingId(null);
+    sessionStorage.removeItem('indexeddb_current_meeting_id');
+    setTranscripts([]);
+  }, [currentMeetingId]);
+
   const value: TranscriptContextType = {
     transcripts,
     transcriptsRef,
@@ -573,6 +591,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     clearTranscripts,
     currentMeetingId,
     markMeetingAsSaved,
+    discardCurrentMeeting,
   };
 
   return (

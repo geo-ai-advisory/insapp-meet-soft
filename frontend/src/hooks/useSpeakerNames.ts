@@ -49,8 +49,20 @@ export interface SpeakerNamesApi {
  *
  * enabled=false - хук ничего не грузит и не слушает (имена пришли снаружи).
  */
+function readLiveNames(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = sessionStorage.getItem(LIVE_SPEAKER_NAMES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {}; // повреждённое значение - просто автоподписи
+  }
+}
+
 export function useSpeakerNames(meetingId?: string, enabled: boolean = true): SpeakerNamesApi {
-  const [names, setNames] = useState<Record<string, string>>({});
+  // Идёт запись - имена сразу из сессии: первым же делом они уходят приложению (см. ниже),
+  // пустой список на долю секунды снял бы защиту имён при пересмотре разметки.
+  const [names, setNames] = useState<Record<string, string>>(() => (enabled && !meetingId ? readLiveNames() : {}));
 
   useEffect(() => {
     if (!enabled) return;
@@ -58,12 +70,7 @@ export function useSpeakerNames(meetingId?: string, enabled: boolean = true): Sp
     // Так участника можно назвать прямо во время разговора, и все его
     // реплики (уже сказанные и будущие) сразу идут под этим именем.
     if (!meetingId) {
-      if (typeof window !== 'undefined') {
-        try {
-          const raw = sessionStorage.getItem(LIVE_SPEAKER_NAMES_KEY);
-          if (raw) setNames(JSON.parse(raw));
-        } catch { /* повреждённое значение - просто автоподписи */ }
-      }
+      setNames(readLiveNames());
       return;
     }
     let alive = true;
@@ -108,6 +115,16 @@ export function useSpeakerNames(meetingId?: string, enabled: boolean = true): Sp
       .catch(() => { /* dev-браузер без движка */ });
     return () => { alive = false; if (unlisten) unlisten(); };
   }, [meetingId, enabled]);
+
+  // Идёт запись: имена отдаём приложению. Раз в 30 с оно пересматривает, кто есть кто, и без
+  // имён могло отдать голос названного человека другому номеру - имя оставалось на пустом
+  // номере, человек пропадал из списка (Geo 02.10). С именами названный номер в приоритете.
+  useEffect(() => {
+    if (!enabled || meetingId) return;
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('diarization_set_live_names', { names }))
+      .catch(() => { /* dev-браузер без движка или старое приложение - имена всё равно видны на экране */ });
+  }, [names, meetingId, enabled]);
 
   const saveName = useCallback(async (key: string, name: string) => {
     setNames((prev) => {

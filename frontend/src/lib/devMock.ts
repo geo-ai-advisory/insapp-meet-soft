@@ -475,8 +475,14 @@ export function installDevTauriMock() {
     get_notification_settings: () => ({ notification_preferences: { show_recording_started: true, show_recording_stopped: true, show_transcription_complete: true } }),
 
     // Фоновые резюме (dev): состояние входа в Claude - ?dev_claude=out|ready|nocli|codex.
-    ai_summary_status: () => devSummaryReadiness(),
+    // ?dev_slow_status=1 - проверка входа в Claude отвечает через 5 с (галочка авто-резюме не должна гаснуть).
+    ai_summary_status: () => (qs('dev_slow_status')
+      ? new Promise((r) => setTimeout(() => r(devSummaryReadiness()), 5000))
+      : devSummaryReadiness()),
     ai_summary_set_auto: (args: any) => { devAuto = !!args?.enabled; return devSummaryReadiness(); },
+    ai_summary_get_settings: () => ({ provider: 'claude', command: 'claude', model: 'sonnet', auto_summary: devAuto }),
+    // «Удалить запись» в окне сохранения: в браузере файлов нет - просто успех.
+    discard_recording: () => null,
     ai_summary_run_batch: () => {
       if (devSummaryReadiness().logged_in === false) throw 'AUTH: Claude не авторизован - войди в свой аккаунт Claude';
       return { started: true };

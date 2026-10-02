@@ -62,6 +62,11 @@ const LIVE_MIN_LONG: usize = 6;
 /// Во время записи не сливаем «маленькую» группу, если голос появился за последние
 /// столько секунд: это может быть только что подключившийся человек, а не осколок.
 const LIVE_PROTECT_RECENT_SEC: f64 = 120.0;
+/// Множитель совпадения по времени для номера, которому пользователь дал имя: при пересмотре
+/// названный номер забирает группу, где больше всего ЕГО речи, даже если под безымянным номером
+/// того же голоса речи больше. Умножение, а не прибавка: названному номеру достаётся именно его
+/// главный голос, а не любая группа, где он мелькнул.
+const NAMED_WEIGHT: f64 = 1.0e6;
 
 /// Новый голос заводим только по достаточно длинной реплике (сек). Короткая
 /// непохожая реплика - чаще всего тот же человек в плохих условиях (кашель,
@@ -200,6 +205,50 @@ static FINAL_VOICES: Lazy<Mutex<Vec<(usize, Vec<f32>, f32)>>> = Lazy::new(|| Mut
 
 /// Голоса коллег (имя, центр голоса) - загружаются при старте записи для узнавания.
 static PROFILES: Lazy<Mutex<Vec<(String, Vec<f32>)>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+/// Имена, которые пользователь дал собеседникам ЭТОЙ записи: номер -> имя (нижний регистр).
+/// Окно записи присылает их при каждом изменении. Пересмотр разметки их уважает: группа,
+/// где звучит названный человек, получает его номер, а его реплики не уходят к другому
+/// человеку (к номеру с тем же именем - можно, это слитые вручную голоса).
+/// Geo 02.10: «я записал собеседника, а потом он исчез» - пересмотр раз в 30 с отдал голос
+/// названного номера другому номеру (у того реплик было больше), имя осталось на пустом номере.
+static LIVE_NAMES: Lazy<Mutex<std::collections::HashMap<usize, String>>> =
+    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Подпись без имени («Собеседник», «Собеседник 3») - это не имя, а слияние с безымянным голосом.
+fn is_auto_label(name: &str) -> bool {
+    name == "собеседник"
+        || name
+            .strip_prefix("собеседник ")
+            .map(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_digit()))
+            .unwrap_or(false)
+}
+
+/// Имена собеседников этой записи из окна записи: «system_N» -> имя.
+#[tauri::command]
+pub fn diarization_set_live_names(names: std::collections::HashMap<String, String>) {
+    let mut map = std::collections::HashMap::new();
+    for (key, name) in names {
+        let Some(n) = key.strip_prefix("system_").and_then(|s| s.parse::<usize>().ok()) else {
+            continue;
+        };
+        let name = name.trim().to_lowercase();
+        if n == 0 || name.is_empty() || is_auto_label(&name) {
+            continue;
+        }
+        map.insert(n, name);
+    }
+    if let Ok(mut g) = LIVE_NAMES.lock() {
+        if *g != map {
+            info!("[diarization] имена собеседников записи: {:?}", map);
+            *g = map;
+        }
+    }
+}
+
+fn live_names() -> std::collections::HashMap<usize, String> {
+    LIVE_NAMES.lock().map(|g| g.clone()).unwrap_or_default()
+}
 
 /// Задать голоса коллег для узнавания в этой записи.
 pub fn set_profiles(profiles: Vec<(String, Vec<f32>)>) {
@@ -349,6 +398,9 @@ pub fn reset() {
     if let Ok(mut v) = FINAL_VOICES.lock() {
         v.clear();
     }
+    if let Ok(mut n) = LIVE_NAMES.lock() {
+        n.clear();
+    }
 }
 
 /// Освободить память модели (при остановке записи).
@@ -357,7 +409,7 @@ pub fn unload() {
         if let Some(d) = guard.as_ref() {
             // Все реплики встречи уже размечены - пересматриваем разметку целиком.
             let started = std::time::Instant::now();
-            let labels = final_relabel(&d.records);
+            let labels = final_relabel(&d.records, &live_names());
             let mut map = std::collections::HashMap::new();
             let mut changed = 0usize;
             for (r, &n) in d.records.iter().zip(&labels) {
@@ -504,8 +556,9 @@ fn stick_to_last(d: &mut Diarizer, now: f64, duration: f32) -> SpeakerRole {
 /// собеседникам во время встречи, остаются у тех же людей. Если во время записи два
 /// человека были слиты под одним номером, номер остаётся у того, кто говорил больше,
 /// второй получает новый номер (или номер, под которым он уже мелькал).
-pub fn final_relabel(records: &[GuestRecord]) -> Vec<usize> {
-    relabel_impl(records, None)
+/// `named` - имена, данные пользователем во время записи (номер -> имя), см. LIVE_NAMES.
+pub fn final_relabel(records: &[GuestRecord], named: &std::collections::HashMap<usize, String>) -> Vec<usize> {
+    relabel_impl(records, None, named)
 }
 
 /// Пересмотр разметки по ходу записи (раз в ~30 с): исправляет слияния похожих голосов
@@ -525,7 +578,7 @@ pub fn relabel_live() -> Vec<(i64, usize)> {
         return Vec::new();
     }
     let now = snapshot.iter().map(|r| r.at).fold(0.0f64, f64::max);
-    let labels = relabel_impl(&snapshot, Some(now - LIVE_PROTECT_RECENT_SEC));
+    let labels = relabel_impl(&snapshot, Some(now - LIVE_PROTECT_RECENT_SEC), &live_names());
 
     let mut guard = match DIARIZER.lock() {
         Ok(g) => g,
@@ -575,7 +628,11 @@ fn rebuild_guests(d: &mut Diarizer) {
     }
 }
 
-pub(crate) fn relabel_impl(records: &[GuestRecord], protect_since: Option<f64>) -> Vec<usize> {
+pub(crate) fn relabel_impl(
+    records: &[GuestRecord],
+    protect_since: Option<f64>,
+    named: &std::collections::HashMap<usize, String>,
+) -> Vec<usize> {
     let keep: Vec<usize> = records.iter().map(|r| r.live).collect();
     let long: Vec<usize> = (0..records.len())
         .filter(|&i| records[i].emb.is_some() && records[i].dur >= FINAL_LONG_SEC)
@@ -664,8 +721,32 @@ pub(crate) fn relabel_impl(records: &[GuestRecord], protect_since: Option<f64>) 
             first_at[label[i] - 1] = first_at[label[i] - 1].min(r.at);
         }
     }
+    // Главный голос названного человека (группа, где больше всего его речи) - не осколок, даже если
+    // речи мало: иначе он слился бы с чужим крупным голосом и приоритет имени (шаг 4) отдал бы имя
+    // чужим репликам. Случайные реплики названного номера в других группах - обычные осколки.
+    let mut has_named = vec![false; k];
+    for &n in named.keys() {
+        let mut by_group = vec![0f32; k];
+        for (i, r) in records.iter().enumerate() {
+            if r.live == n && label[i] > 0 {
+                by_group[label[i] - 1] += r.dur;
+            }
+        }
+        if let Some((g, _)) = by_group
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| **d > 0.0)
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        {
+            has_named[g] = true;
+        }
+    }
     let big: Vec<bool> = (0..k)
-        .map(|g| total[g] >= FINAL_SMALL_GROUP_SEC || protect_since.map(|t0| first_at[g] >= t0).unwrap_or(false))
+        .map(|g| {
+            total[g] >= FINAL_SMALL_GROUP_SEC
+                || has_named[g]
+                || protect_since.map(|t0| first_at[g] >= t0).unwrap_or(false)
+        })
         .collect();
     if big.iter().any(|&b| b) {
         let remap: Vec<usize> = (0..k)
@@ -690,17 +771,41 @@ pub(crate) fn relabel_impl(records: &[GuestRecord], protect_since: Option<f64>) 
             overlap[r.live - 1][gi] += r.dur as f64;
         }
     }
+    // Номер, которому пользователь дал имя, - в приоритете: его главный голос получает его номер,
+    // даже если под другим номером того же голоса реплик больше.
+    for (li, row) in overlap.iter_mut().enumerate() {
+        if named.contains_key(&(li + 1)) {
+            row.iter_mut().for_each(|w| *w *= NAMED_WEIGHT);
+        }
+    }
     let assign = hungarian_max(&overlap); // для каждого номера записи - группа
+    // Названные номера, за которыми остался свой голос.
+    let kept: std::collections::HashSet<usize> =
+        assign.iter().enumerate().filter_map(|(li, g)| g.map(|_| li + 1)).collect();
+    // Реплику названного человека пересмотр не переносит: к человеку с другим именем - никогда
+    // (пользователь сказал, что это разные люди); к безымянному или новому номеру - только если
+    // за названным номером остался свой голос (это отделение чужих реплик, а не пропажа человека).
+    // К номеру с тем же именем (голоса, слитые вручную одним именем) - можно.
+    let stays = |live: usize, to: usize| -> bool {
+        match named.get(&live) {
+            Some(name) if to != live => match named.get(&to) {
+                Some(other) => other != name,
+                None => !kept.contains(&live),
+            },
+            _ => false,
+        }
+    };
     let mut number = vec![0usize; groups_used.len()];
     for (live, g) in assign.iter().enumerate() {
         if let Some(g) = g {
             number[*g] = live + 1;
         }
     }
-    // Группы без пары - новые номера, по порядку первого появления.
+    // Группы без пары - новые номера, по порядку первого появления. Номер получает только группа,
+    // где есть реплики, которые туда правда перейдут (см. stays), - иначе в нумерации пропуски.
     let mut next = live_max + 1;
     for &i in &order {
-        if label[i] > 0 {
+        if label[i] > 0 && !stays(records[i].live, usize::MAX) {
             let gi = groups_used.binary_search(&(label[i] - 1)).unwrap();
             if number[gi] == 0 {
                 number[gi] = next;
@@ -708,9 +813,15 @@ pub(crate) fn relabel_impl(records: &[GuestRecord], protect_since: Option<f64>) 
             }
         }
     }
-    (0..records.len())
+    let mut out: Vec<usize> = (0..records.len())
         .map(|i| if label[i] > 0 { number[groups_used.binary_search(&(label[i] - 1)).unwrap()] } else { 0 })
-        .collect()
+        .collect();
+    for (i, r) in records.iter().enumerate() {
+        if stays(r.live, out[i]) {
+            out[i] = r.live;
+        }
+    }
+    out
 }
 
 /// Иерархическая кластеризация со средней связью (как scipy linkage «average» +
@@ -908,7 +1019,7 @@ mod relabel_tests {
             recs.push(GuestRecord { at: t, dur: 4.0, emb: Some(voice(v, 0.3, i + 7)), live });
             t += 5.0;
         }
-        let out = final_relabel(&recs);
+        let out = final_relabel(&recs, &Default::default());
         // Голос 0 (больше речи под номером 1) остаётся номером 1, третий - номером 2,
         // голос 1 получает новый номер 3.
         for (r, &n) in recs.iter().zip(&out) {
@@ -929,10 +1040,101 @@ mod relabel_tests {
             recs.push(GuestRecord { at: 200.0 + i as f64 * 5.0, dur: 4.0, emb: Some(voice(5, 0.3, i + 100)), live: 1 });
         }
         // Во время записи (голос свежий) - Б отдельно.
-        let live = relabel_impl(&recs, Some(205.0 - LIVE_PROTECT_RECENT_SEC));
+        let live = relabel_impl(&recs, Some(205.0 - LIVE_PROTECT_RECENT_SEC), &Default::default());
         assert_ne!(live[40], live[0]);
         // После встречи 8 с речи - осколок, сливается (порог 15 с).
-        let fin = final_relabel(&recs);
+        let fin = final_relabel(&recs, &Default::default());
         assert_eq!(fin[40], fin[0]);
+    }
+
+    fn names(pairs: &[(usize, &str)]) -> std::collections::HashMap<usize, String> {
+        pairs.iter().map(|(n, s)| (*n, s.to_lowercase())).collect()
+    }
+
+    /// Случай Geo 02.10: человека назвали, пока он был «Собеседником 1», потом во время записи
+    /// тот же голос пошёл под номером 2 (и наговорил больше). Пересмотр отдавал голос номеру 2,
+    /// имя оставалось на пустом номере 1 - человек пропадал. Теперь голос получает названный номер.
+    fn same_voice_under_two_numbers() -> Vec<GuestRecord> {
+        let mut recs = Vec::new();
+        for i in 0..10u32 {
+            recs.push(GuestRecord { at: i as f64 * 5.0, dur: 4.0, emb: Some(voice(0, 0.3, i + 1)), live: 1 });
+        }
+        for i in 0..30u32 {
+            recs.push(GuestRecord { at: 50.0 + i as f64 * 5.0, dur: 4.0, emb: Some(voice(0, 0.3, i + 50)), live: 2 });
+        }
+        recs
+    }
+
+    #[test]
+    fn named_person_does_not_disappear() {
+        let recs = same_voice_under_two_numbers();
+        // Без имён номер достаётся тому, у кого больше речи (2) - так и было.
+        let plain = final_relabel(&recs, &Default::default());
+        assert!(plain.iter().all(|&n| n == 2), "{:?}", plain);
+        // Номер 1 назван - весь голос под ним, и во время записи, и после встречи.
+        let named = names(&[(1, "Андрей Б")]);
+        assert!(final_relabel(&recs, &named).iter().all(|&n| n == 1));
+        assert!(relabel_impl(&recs, Some(200.0 - LIVE_PROTECT_RECENT_SEC), &named).iter().all(|&n| n == 1));
+    }
+
+    #[test]
+    fn different_names_are_never_merged_and_same_name_is() {
+        let recs = same_voice_under_two_numbers();
+        // Пользователь назвал номера разными людьми - пересмотр не сливает их, хотя голос похож.
+        let out = final_relabel(&recs, &names(&[(1, "Андрей"), (2, "Пётр")]));
+        for (r, &n) in recs.iter().zip(&out) {
+            assert_eq!(n, r.live, "реплика в {} c", r.at);
+        }
+        // Одно имя на двух номерах (слили вручную) - сливаются под один номер.
+        let out = final_relabel(&recs, &names(&[(1, "Андрей"), (2, "андрей")]));
+        assert!(out.iter().all(|&n| n == out[0]), "{:?}", out);
+    }
+
+    #[test]
+    fn named_number_with_two_people_still_splits() {
+        // Под названным номером 1 оказались двое (голоса 0 и 1) - второго пересмотр по-прежнему
+        // отделяет в новый номер, имя остаётся у главного голоса.
+        let mut recs = Vec::new();
+        let mut t = 0.0;
+        for i in 0..40u32 {
+            let (v, live) = match i % 4 { 0 | 1 => (0, 1), 2 => (1, 1), _ => (2, 2) };
+            recs.push(GuestRecord { at: t, dur: 4.0, emb: Some(voice(v, 0.3, i + 7)), live });
+            t += 5.0;
+        }
+        let out = final_relabel(&recs, &names(&[(1, "Андрей")]));
+        for (i, (r, &n)) in recs.iter().zip(&out).enumerate() {
+            let want = match (i % 4, r.live) { (0 | 1, _) => 1, (2, _) => 3, _ => 2 };
+            assert_eq!(n, want, "реплика в {} c", r.at);
+        }
+    }
+
+    #[test]
+    fn named_quiet_person_is_not_a_fragment_of_a_loud_one() {
+        // Громкий безымянный (номер 1) и тихий названный (номер 2, 8 с речи, другой голос).
+        let mut recs = Vec::new();
+        for i in 0..40u32 {
+            recs.push(GuestRecord { at: i as f64 * 5.0, dur: 4.0, emb: Some(voice(0, 0.3, i + 1)), live: 1 });
+        }
+        for i in 0..2u32 {
+            recs.push(GuestRecord { at: 300.0 + i as f64 * 5.0, dur: 4.0, emb: Some(voice(5, 0.3, i + 100)), live: 2 });
+        }
+        let out = final_relabel(&recs, &names(&[(2, "Ольга")]));
+        // Тихий остаётся собой, а громкий не получает его имя.
+        for (r, &n) in recs.iter().zip(&out) {
+            assert_eq!(n, r.live, "реплика в {} c", r.at);
+        }
+    }
+
+    #[test]
+    fn auto_labels_are_not_names() {
+        diarization_set_live_names(
+            [("system_1", "Собеседник 3"), ("system_2", "  Анна "), ("system_3", "Собеседник"), ("mic", "Вы")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        );
+        assert_eq!(live_names(), names(&[(2, "анна")]));
+        diarization_set_live_names(Default::default());
+        assert!(live_names().is_empty());
     }
 }

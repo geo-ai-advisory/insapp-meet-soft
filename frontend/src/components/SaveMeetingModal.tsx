@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Trash2 } from 'lucide-react';
 
 /**
  * Окно «Сохранить встречу» - всплывает при нажатии «Стоп» (как #bStopModal в макете
  * Insapp Pro). Пользователь подтверждает/правит название, выбирает тип и видит, куда
  * уйдёт встреча. «Сохранить» запускает реальную остановку+сохранение, «Отмена» -
  * закрывает окно (запись продолжается).
+ * «Удалить запись» (Geo 02.10) - остановить и не сохранять: после подтверждения в этом же окне
+ * встреча не сохраняется и никуда не уходит, звук и расшифровка удаляются.
  */
 export function SaveMeetingModal({
   open,
@@ -16,6 +18,7 @@ export function SaveMeetingModal({
   willUpload = true,
   onCancel,
   onConfirm,
+  onDiscard,
 }: {
   open: boolean;
   defaultName: string;
@@ -23,19 +26,70 @@ export function SaveMeetingModal({
   willUpload?: boolean;
   onCancel: () => void;
   onConfirm: (name: string, type: 'in' | 'out') => void;
+  onDiscard?: () => void;
 }) {
   const [name, setName] = useState(defaultName);
   const [type, setType] = useState<'in' | 'out'>(defaultType);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   // Сбросить поля при каждом открытии.
   useEffect(() => {
     if (open) {
       setName(defaultName);
       setType(defaultType);
+      setConfirmDiscard(false);
     }
   }, [open, defaultName, defaultType]);
 
   if (!open) return null;
+
+  // Подтверждение удаления - в том же окне, в виде общего окна удаления приложения.
+  if (confirmDiscard && onDiscard) {
+    return (
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4 backdrop-blur-[2px]"
+        onClick={() => setConfirmDiscard(false)}
+      >
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="discard-meeting-title"
+          className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-border bg-card shadow-[0_20px_60px_rgba(15,23,42,0.25)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-3 px-6 pb-3 pt-6">
+            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <Trash2 className="h-5 w-5" />
+            </span>
+            <h2 id="discard-meeting-title" className="text-[17px] font-semibold text-foreground">
+              Удалить запись?
+            </h2>
+          </div>
+          <p className="px-6 text-[14px] leading-relaxed text-muted-foreground">
+            Встреча не сохранится и никуда не уйдёт: звук и расшифровка удалятся.
+          </p>
+          <div className="flex items-center justify-end gap-2.5 px-6 pb-6 pt-5">
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setConfirmDiscard(false)}
+              className="rounded-xl border border-border px-4 py-2.5 text-[13.5px] font-medium text-foreground transition-colors hover:bg-secondary"
+            >
+              Не удалять
+            </button>
+            <button
+              type="button"
+              onClick={onDiscard}
+              className="flex items-center gap-2 rounded-xl bg-destructive px-5 py-2.5 text-[13.5px] font-semibold text-destructive-foreground shadow-sm transition-colors hover:bg-destructive/90 active:scale-[0.98]"
+            >
+              <Trash2 className="h-4 w-4" />
+              Удалить
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -125,6 +179,16 @@ export function SaveMeetingModal({
 
         {/* Кнопки */}
         <div className="flex items-center justify-end gap-2.5 px-6 pb-6 pt-4">
+          {onDiscard && (
+            <button
+              type="button"
+              onClick={() => setConfirmDiscard(true)}
+              className="mr-auto flex items-center gap-1.5 rounded-xl px-2 py-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+              Удалить запись
+            </button>
+          )}
           <button
             type="button"
             onClick={onCancel}

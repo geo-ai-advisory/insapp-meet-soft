@@ -256,8 +256,8 @@ async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     match store.get("authToken") {
         Some(token) => {
             if let Some(token_str) = token.as_str() {
-                let truncated = token_str.chars().take(20).collect::<String>();
-                log_info!("Found auth token: {}", truncated);
+                // Сам ключ в журнал не пишем даже частично: журнал лежит файлом на диске.
+                log_info!("Found auth token ({} chars)", token_str.len());
                 Some(token_str.to_string())
             } else {
                 log_warn!("Auth token is not a string");

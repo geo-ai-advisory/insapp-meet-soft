@@ -1417,3 +1417,68 @@ pub fn get_diarize_guests() -> serde_json::Value {
         "model_ready": crate::audio::diarization::is_model_downloaded(),
     })
 }
+
+/// Папка удалённых записей внутри папки записей (скрытая). Запись лежит там неделю на случай,
+/// если «Удалить запись» нажали по ошибке, потом стирается.
+const DISCARDED_DIR: &str = ".Удалённые записи";
+const DISCARDED_KEEP_DAYS: u64 = 7;
+
+/// «Удалить запись» в окне «Сохранить встречу»: встреча не сохраняется, папка записи
+/// (звук, расшифровка) уходит в удалённые. Geo 02.10: «после встречи, при сохранении встречи
+/// нужно добавить возможность удалить встречу и не сохранять».
+/// Трогаем только папку внутри папки записей, которой нет среди сохранённых встреч.
+#[tauri::command]
+pub async fn discard_recording<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, crate::state::AppState>,
+    folder_path: String,
+) -> Result<(), String> {
+    if is_recording_now() {
+        return Err("Запись ещё идёт".to_string());
+    }
+    let prefs = crate::audio::recording_preferences::load_recording_preferences(&app)
+        .await
+        .map_err(|e| e.to_string())?;
+    let base = prefs.save_folder.canonicalize().map_err(|e| format!("Папка записей не найдена: {}", e))?;
+    let target = std::path::PathBuf::from(&folder_path)
+        .canonicalize()
+        .map_err(|e| format!("Папка записи не найдена: {}", e))?;
+    if target.parent() != Some(base.as_path()) {
+        return Err("Это не папка записи".to_string());
+    }
+    let saved: Option<(String,)> = sqlx::query_as("SELECT id FROM meetings WHERE folder_path = ? LIMIT 1")
+        .bind(&folder_path)
+        .fetch_optional(state.db_manager.pool())
+        .await
+        .map_err(|e| e.to_string())?;
+    if saved.is_some() {
+        return Err("Эта запись уже сохранена как встреча".to_string());
+    }
+
+    let bin = base.join(DISCARDED_DIR);
+    std::fs::create_dir_all(&bin).map_err(|e| format!("Не удалось удалить запись: {}", e))?;
+    // Старше недели - стираем совсем.
+    let keep = std::time::Duration::from_secs(DISCARDED_KEEP_DAYS * 24 * 3600);
+    if let Ok(entries) = std::fs::read_dir(&bin) {
+        for e in entries.flatten() {
+            let old = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|age| age > keep)
+                .unwrap_or(false);
+            if old {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    let name = target.file_name().map(|n| n.to_owned()).unwrap_or_default();
+    let dest = bin.join(&name);
+    let _ = std::fs::remove_dir_all(&dest);
+    std::fs::rename(&target, &dest).map_err(|e| format!("Не удалось удалить запись: {}", e))?;
+    // Время удаления = время папки: по нему через неделю она сотрётся.
+    let _ = std::fs::File::create(dest.join(".deleted"));
+    info!("[recording] запись удалена без сохранения: {}", target.display());
+    Ok(())
+}

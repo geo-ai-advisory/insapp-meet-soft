@@ -220,7 +220,7 @@ fn learn_from_audio(
     if records.is_empty() {
         return Ok(Vec::new());
     }
-    let labels = diarization::relabel_impl(&records, None);
+    let labels = diarization::relabel_impl(&records, None, &Default::default());
     Ok(diarization::voices_of(&records, &labels))
 }
 

@@ -38,6 +38,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { SaveMeetingModal } from '@/components/SaveMeetingModal';
 import { describeRecordingStartError } from '@/components/RecordingControls';
 import { indexedDBService } from '@/services/indexedDBService';
+import { resetLiveSpeakerNames } from '@/hooks/useSpeakerNames';
 import { defaultMeetingName, initialsOf, isAutoMeetingTitle, parseMeetingDate } from '@/lib/meetingFormat';
 import { UnifiedSidebar, MeetingListItem } from './UnifiedSidebar';
 import { StartPlate, RecordingPlate } from './RecordPlate';
@@ -159,7 +160,7 @@ export default function UnifiedHome() {
   const [me, setMe] = useState<{ name: string; initials: string }>({ name: '', initials: 'Вы' });
 
   // Use contexts for state management
-  const { meetingTitle, setMeetingTitle } = useTranscripts();
+  const { meetingTitle, setMeetingTitle, discardCurrentMeeting } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
   useStartupPermissions(recordingState.isRecording);
@@ -314,6 +315,34 @@ export default function UnifiedHome() {
     // Имя и тип передаём ЯВНО (React state setMeetingTitle не успевает примениться
     // до сохранения): overrideName перебивает дефолтное backend-имя, тип уходит в БД и на сервер.
     handleRecordingStop(true, name, type === 'out' ? 'external' : 'internal');
+  };
+
+  // «Удалить запись» в окне сохранения: та же реальная остановка, но встреча не сохраняется,
+  // папка записи (звук и расшифровка) уходит в удалённые. Geo 02.10: «при сохранении встречи
+  // нужно добавить возможность удалить встречу и не сохранять».
+  const handleDiscard = async () => {
+    setShowSaveModal(false);
+    setIsStopping(true);
+    try {
+      const dataDir = await appDataDir();
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      await invoke('stop_recording', { args: { save_path: `${dataDir}/recording-${ts}.wav` } });
+    } catch (e) {
+      console.error('[insapp-meet] discard: ошибка остановки записи', e);
+    }
+    await handleRecordingStop(false); // без сохранения: дождаться распознавания и вернуться к старту
+    await discardCurrentMeeting();
+    resetLiveSpeakerNames();
+    const folder = sessionStorage.getItem('last_recording_folder_path');
+    sessionStorage.removeItem('last_recording_folder_path');
+    sessionStorage.removeItem('last_recording_meeting_name');
+    try {
+      if (folder) await invoke('discard_recording', { folderPath: folder });
+      toast.success('Запись удалена', { description: 'Встреча не сохранена' });
+    } catch (e) {
+      console.error('[insapp-meet] discard: файлы записи не удалились', e);
+      toast.error('Встреча не сохранена, но файлы записи остались на диске', { description: String(e) });
+    }
   };
 
   // Старт записи с плашки: мгновенно «Запускаю запись…», ошибки устройства - понятным текстом.
@@ -488,6 +517,7 @@ export default function UnifiedHome() {
         willUpload={typeof window !== 'undefined' ? sessionStorage.getItem('insapp_upload_to_cloud') !== 'false' : true}
         onCancel={() => setShowSaveModal(false)}
         onConfirm={handleConfirmSave}
+        onDiscard={handleDiscard}
       />
     </>
   );

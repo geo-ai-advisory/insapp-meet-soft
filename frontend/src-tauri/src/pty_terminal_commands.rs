@@ -177,17 +177,54 @@ async fn ensure_kv(pool: &SqlitePool) {
     let _ = crate::insapp_server::ensure_kv_table(pool).await;
 }
 
-pub async fn load_ai_settings(pool: &SqlitePool) -> AiSummarySettings {
+/// Настройки из базы. Сбой чтения - ошибка, а не «настройки по умолчанию»: раньше он показывал
+/// галочку авто-резюме снятой, а сохранение настроек поверх такого чтения снимало её по-настоящему
+/// (Geo 02.10: «постоянно слетает галочка авто резюме»). Читаем с тремя попытками.
+pub async fn try_load_ai_settings(pool: &SqlitePool) -> Result<AiSummarySettings, String> {
     ensure_kv(pool).await;
-    let row: Result<Option<(String,)>, _> =
-        sqlx::query_as("SELECT value FROM insapp_kv WHERE key = ?")
-            .bind(KV_AI_SETTINGS)
-            .fetch_optional(pool)
-            .await;
-    match row {
-        Ok(Some((json,))) => serde_json::from_str(&json).unwrap_or_default(),
-        _ => AiSummarySettings::default(),
+    let mut last = String::new();
+    for attempt in 1..=3 {
+        let row: Result<Option<(String,)>, _> =
+            sqlx::query_as("SELECT value FROM insapp_kv WHERE key = ?")
+                .bind(KV_AI_SETTINGS)
+                .fetch_optional(pool)
+                .await;
+        match row {
+            Ok(Some((json,))) => return Ok(parse_ai_settings(&json)),
+            Ok(None) => return Ok(AiSummarySettings::default()),
+            Err(e) => {
+                last = e.to_string();
+                log::warn!("[ai-settings] не прочитать настройки (попытка {}): {}", attempt, last);
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+        }
     }
+    Err(format!("Не удалось прочитать настройки AI-резюме: {}", last))
+}
+
+/// Разбор сохранённых настроек. Если запись не разбирается целиком (поле другого вида) -
+/// остальное по умолчанию, но галочку авто-резюме и модель сохраняем, если их видно.
+fn parse_ai_settings(json: &str) -> AiSummarySettings {
+    match serde_json::from_str::<AiSummarySettings>(json) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[ai-settings] настройки не разбираются ({}), остальное - по умолчанию", e);
+            let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+            let mut s = AiSummarySettings::default();
+            if let Some(a) = v.get("auto_summary").and_then(|x| x.as_bool()) {
+                s.auto_summary = a;
+            }
+            if let Some(m) = v.get("model").and_then(|x| x.as_str()) {
+                s.model = m.to_string();
+            }
+            s
+        }
+    }
+}
+
+/// Для чтения промпта и модели: при сбое - настройки по умолчанию (записывать их нельзя).
+pub async fn load_ai_settings(pool: &SqlitePool) -> AiSummarySettings {
+    try_load_ai_settings(pool).await.unwrap_or_default()
 }
 
 pub async fn save_ai_settings(
@@ -213,7 +250,7 @@ pub async fn ai_summary_get_settings<R: Runtime>(
     state: State<'_, AppState>,
 ) -> Result<AiSummarySettings, String> {
     let pool = state.db_manager.pool();
-    Ok(load_ai_settings(pool).await)
+    try_load_ai_settings(pool).await
 }
 
 #[tauri::command]
@@ -226,10 +263,11 @@ pub async fn ai_summary_save_settings<R: Runtime>(
     // Галочку авто-резюме и модель экран настроек не показывает: берём их из
     // сохранённого, иначе старая копия настроек на экране молча выключила бы
     // авто-резюме, включённое на главной.
-    let current = load_ai_settings(pool).await;
+    let current = try_load_ai_settings(pool).await?;
     let mut settings = settings;
     settings.auto_summary = current.auto_summary;
     settings.model = current.model;
+    log::info!("[ai-settings] настройки сохранены экраном настроек (авто-резюме: {})", settings.auto_summary);
     save_ai_settings(pool, &settings)
         .await
         .map_err(|e| format!("Не удалось сохранить настройки AI-резюме: {}", e))
@@ -1031,21 +1069,21 @@ pub struct SummaryReadiness {
     pub model: String,
 }
 
-async fn readiness(pool: &SqlitePool) -> SummaryReadiness {
-    let s = load_ai_settings(pool).await;
+async fn readiness(pool: &SqlitePool) -> Result<SummaryReadiness, String> {
+    let s = try_load_ai_settings(pool).await?;
     let cli = resolve_cli(&s.command);
     let logged_in = match (&cli, s.provider.as_str()) {
         (Some(p), "claude") => claude_logged_in(p).await,
         _ => None,
     };
-    SummaryReadiness {
+    Ok(SummaryReadiness {
         claude_ready: s.provider == "claude" && cli.is_some() && logged_in == Some(true),
         provider: s.provider.clone(),
         cli_path: cli.map(|p| p.to_string_lossy().to_string()),
         logged_in,
         auto_summary: s.auto_summary,
         model: s.model.clone(),
-    }
+    })
 }
 
 #[tauri::command]
@@ -1053,7 +1091,7 @@ pub async fn ai_summary_status<R: Runtime>(
     _app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<SummaryReadiness, String> {
-    Ok(readiness(state.db_manager.pool()).await)
+    readiness(state.db_manager.pool()).await
 }
 
 /// Включить/выключить авто-резюме после встречи.
@@ -1064,12 +1102,13 @@ pub async fn ai_summary_set_auto<R: Runtime>(
     enabled: bool,
 ) -> Result<SummaryReadiness, String> {
     let pool = state.db_manager.pool();
-    let mut s = load_ai_settings(pool).await;
+    let mut s = try_load_ai_settings(pool).await?;
     s.auto_summary = enabled;
     save_ai_settings(pool, &s)
         .await
         .map_err(|e| format!("Не удалось сохранить настройку: {}", e))?;
-    Ok(readiness(pool).await)
+    log::info!("[auto-summary] галочка: {}", if enabled { "включена" } else { "выключена" });
+    readiness(pool).await
 }
 
 // ------------------------------------------------------------
@@ -1190,7 +1229,7 @@ pub async fn ai_summary_generate<R: Runtime>(
     meeting_id: String,
 ) -> Result<(), String> {
     let pool = state.db_manager.pool().clone();
-    let r = readiness(&pool).await;
+    let r = readiness(&pool).await?;
     if r.cli_path.is_none() {
         return Err("Не найден инструмент для резюме. Проверь настройки AI-резюме.".to_string());
     }
@@ -1217,8 +1256,15 @@ pub fn ai_summary_jobs() -> Vec<serde_json::Value> {
 /// Вызывается после сохранения встречи; ничего не ждёт и ничего не ломает при отказе.
 pub fn maybe_auto_summary<R: Runtime>(app: tauri::AppHandle<R>, pool: SqlitePool, meeting_id: String) {
     tauri::async_runtime::spawn(async move {
-        let r = readiness(&pool).await;
+        let r = match readiness(&pool).await {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("[auto-summary] пропуск {}: {}", meeting_id, e);
+                return;
+            }
+        };
         if !r.auto_summary {
+            log::info!("[auto-summary] выключено - встреча {} без авто-резюме", meeting_id);
             return;
         }
         if !r.claude_ready {
@@ -1844,6 +1890,18 @@ mod summary_job_tests {
         let s: AiSummarySettings = serde_json::from_str(old).unwrap();
         assert_eq!(s.model, "sonnet");
         assert!(!s.auto_summary);
+    }
+
+    #[test]
+    fn unreadable_settings_keep_auto_summary() {
+        // Поле другого вида ломало разбор целиком - галочка авто-резюме становилась снятой.
+        let broken = r#"{"provider":"claude","args":"oops","auto_summary":true,"model":"opus"}"#;
+        let s = parse_ai_settings(broken);
+        assert!(s.auto_summary);
+        assert_eq!(s.model, "opus");
+        assert_eq!(s.provider, "claude");
+        let ok = r#"{"provider":"claude","command":"claude","args":[],"format":"markdown","prompt_template":"x","use_print_mode":true,"auto_summary":true}"#;
+        assert!(parse_ai_settings(ok).auto_summary);
     }
 
     #[tokio::test]

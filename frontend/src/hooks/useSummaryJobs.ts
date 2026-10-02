@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
@@ -78,32 +78,63 @@ export function useElapsed(startedMs: number | undefined): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/*
+ * Состояние авто-резюме - одно на всё окно (галочка в левой панели, строка на экране записи):
+ * раньше у каждого места была своя копия, и до ответа проверки входа в Claude (до 15 с) галочка
+ * показывалась снятой, а после переключения в одном месте другое показывало старое.
+ * Geo 02.10: «постоянно слетает галочка авто резюме» - в базе она стояла, резюме делались.
+ */
+let sharedReadiness: SummaryReadiness | null = null;
+/** Сохранённая галочка - читается за доли секунды, без проверки входа в Claude. */
+let sharedAuto: boolean | null = null;
+const readinessListeners = new Set<() => void>();
+const publishReadiness = () => readinessListeners.forEach((f) => f());
+
 /** Готовность Claude + переключатель авто-резюме. Обновляется после входа в Claude. */
 export function useSummaryReadiness() {
-  const [readiness, setReadiness] = useState<SummaryReadiness | null>(null);
+  const [, rerender] = useReducer((x: number) => x + 1, 0);
 
   const refresh = useCallback(async () => {
     try {
-      setReadiness(await invoke<SummaryReadiness>('ai_summary_status'));
+      const r = await invoke<SummaryReadiness>('ai_summary_status');
+      sharedReadiness = r;
+      sharedAuto = r.auto_summary;
+      publishReadiness();
     } catch {
-      /* статус не критичен - просто не показываем галочку */
+      /* не прочиталось - оставляем последнее известное состояние, а не «выключено» */
     }
   }, []);
 
   useEffect(() => {
+    readinessListeners.add(rerender);
+    if (sharedAuto === null) {
+      invoke<{ auto_summary?: boolean }>('ai_summary_get_settings')
+        .then((s) => {
+          if (sharedAuto === null && s) {
+            sharedAuto = !!s.auto_summary;
+            publishReadiness();
+          }
+        })
+        .catch(() => {});
+    }
     refresh();
     const onChange = () => { refresh(); };
     window.addEventListener('claude-login-changed', onChange);
-    return () => window.removeEventListener('claude-login-changed', onChange);
+    return () => {
+      readinessListeners.delete(rerender);
+      window.removeEventListener('claude-login-changed', onChange);
+    };
   }, [refresh]);
 
   const setAuto = useCallback(async (enabled: boolean) => {
     const r = await invoke<SummaryReadiness>('ai_summary_set_auto', { enabled });
-    setReadiness(r);
+    sharedReadiness = r;
+    sharedAuto = r.auto_summary;
+    publishReadiness();
     return r;
   }, []);
 
-  return { readiness, refresh, setAuto };
+  return { readiness: sharedReadiness, autoSaved: sharedAuto, refresh, setAuto };
 }
 
 /**
@@ -116,11 +147,12 @@ export function useSummaryReadiness() {
  * (Логика перенесена без изменений из AutoSummaryToggle старой главной.)
  */
 export function useAutoSummaryState(onOpenSettings: () => void) {
-  const { readiness, setAuto } = useSummaryReadiness();
+  const { readiness, autoSaved, setAuto } = useSummaryReadiness();
   const [saving, setSaving] = useState(false);
 
   const checking = readiness === null;
-  const on = !!readiness?.auto_summary;
+  // Пока проверяется вход в Claude, галочка - как сохранена (не «снята»).
+  const on = readiness ? readiness.auto_summary : !!autoSaved;
   const ready = !!readiness?.claude_ready;
 
   let hint = '';
@@ -146,8 +178,8 @@ export function useAutoSummaryState(onOpenSettings: () => void) {
       : 'Резюме будет появляться само после каждой встречи - Claude Sonnet, в фоне';
   }
 
-  // Включить можно только при готовом Claude; выключить - всегда.
-  const canToggle = !checking && !saving && (on || ready);
+  // Включить можно только при готовом Claude; выключить - всегда (и пока идёт проверка входа).
+  const canToggle = !saving && (on || (!checking && ready));
 
   const toggle = useCallback(async () => {
     if (!canToggle) {

@@ -43,7 +43,7 @@ export function LiveView({
 }: LiveViewProps) {
   const { transcripts, meetingTitle, setMeetingTitle, copyTranscript } = useTranscripts();
   const names = useSpeakerNames(undefined);
-  const { readiness } = useSummaryReadiness();
+  const { readiness, autoSaved } = useSummaryReadiness();
   const titleRef = useRef<HTMLInputElement>(null);
   const nameInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -96,7 +96,7 @@ export function LiveView({
     return true;
   }, []);
 
-  const autoOn = !!readiness?.auto_summary;
+  const autoOn = readiness ? readiness.auto_summary : !!autoSaved;
 
   return (
     <>

@@ -557,6 +557,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_recording,
             stop_recording,
+            audio::recording_commands::discard_recording,
             is_recording,
             get_transcription_status,
             read_audio_file,
@@ -687,6 +688,7 @@ pub fn run() {
             api::api_set_speaker_name,
             audio::voices::voices_list,
             audio::voices::voices_forget,
+            audio::diarization::diarization_set_live_names,
             audio::voices::voices_learn_now,
             api::api_get_speaker_names,
             api::api_get_meetings_without_summary,
