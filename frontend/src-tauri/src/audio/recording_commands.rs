@@ -53,6 +53,8 @@ static RELABEL_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 /// Раз в 30 с пересматривать разметку собеседников по всей записи: если два похожих
 /// голоса слились под одним номером, реплики перекрашиваются уже во время встречи
 /// (окно записи получает событие speakers-relabeled, файл записи обновляется).
+/// Голоса коллег узнаются чаще - раз в 10 с (дёшево: сравнение центров голосов):
+/// Geo 02.10 «иногда очень долго подтягивается».
 fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
     let generation = RELABEL_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     tauri::async_runtime::spawn(async move {
@@ -61,8 +63,9 @@ fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
             let profiles = crate::audio::voices::load_profiles(state.db_manager.pool()).await;
             crate::audio::diarization::set_profiles(profiles);
         }
+        let mut tick: u64 = 0;
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             if RELABEL_GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation {
                 break;
             }
@@ -71,9 +74,14 @@ fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
             if !recording {
                 break;
             }
-            let changes = tauri::async_runtime::spawn_blocking(crate::audio::diarization::relabel_live)
-                .await
-                .unwrap_or_default();
+            tick += 1;
+            let changes = if tick % 3 == 0 {
+                tauri::async_runtime::spawn_blocking(crate::audio::diarization::relabel_live)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             // Узнали коллег по голосу - окно записи подставит имена тем, кого ещё не назвали.
             let known = tauri::async_runtime::spawn_blocking(crate::audio::diarization::recognize_live)
                 .await

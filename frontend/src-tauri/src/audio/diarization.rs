@@ -293,23 +293,35 @@ pub fn take_final_voices() -> Vec<(usize, Vec<f32>, f32)> {
 }
 
 /// Узнать собеседников этой записи по голосам коллег: (номер, имя, похожесть).
-/// Только уверенные совпадения (см. voices::match_profiles); вызывается раз в ~30 с.
+/// Только уверенные совпадения (см. voices::match_profiles_live); вызывается раз в ~10 с.
 pub fn recognize_live() -> Vec<(usize, String, f32)> {
     let profiles = match PROFILES.lock() {
         Ok(p) if !p.is_empty() => p.clone(),
         _ => return Vec::new(),
     };
-    let voices = match DIARIZER.lock() {
+    crate::audio::voices::match_profiles_live(&live_voices(), &profiles)
+}
+
+/// Голоса собеседников этой записи по текущей разметке: (номер, центр голоса, секунд речи).
+pub fn live_voices() -> Vec<(usize, Vec<f32>, f32)> {
+    match DIARIZER.lock() {
         Ok(g) => match g.as_ref() {
             Some(d) => {
                 let labels: Vec<usize> = d.records.iter().map(|r| r.live).collect();
                 voices_of(&d.records, &labels)
             }
-            None => return Vec::new(),
+            None => Vec::new(),
         },
-        Err(_) => return Vec::new(),
-    };
-    crate::audio::voices::match_profiles(&voices, &profiles)
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Разметка реплик этой записи: (начало реплики, мс; номер собеседника) - для проверочных прогонов.
+pub fn live_labels() -> Vec<(i64, usize)> {
+    match DIARIZER.lock() {
+        Ok(g) => g.as_ref().map(|d| d.records.iter().map(|r| (segment_key(r.at), r.live)).collect()).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Ключ реплики: начало в миллисекундах (одно и то же число приходит из записи и из

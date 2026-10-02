@@ -24,8 +24,14 @@ use tracing::{info, warn};
 const MATCH_MIN: f32 = 0.75;
 /// ...и заметно ближе, чем на второй по похожести профиль.
 const MATCH_MARGIN: f32 = 0.10;
-/// Узнаём собеседника, когда он наговорил хотя бы столько секунд (отпечаток устойчив).
+/// Узнаём собеседника, когда он наговорил хотя бы столько секунд (отпечаток устойчив) - при сохранении.
 const MIN_VOICE_SEC: f32 = 20.0;
+/// Во время записи - раньше: 10 с речи. Geo 02.10: «иногда очень долго подтягивается» - с 20 с и
+/// проверкой раз в 30 с человек ждал имени до 2,5 минут. Прогон 9 встреч Geo с 29.09 по 02.10
+/// (examples/voices_live_timing.rs, журнал 2026-10-02-voices-between-meetings): с 10 с - ни одной
+/// ошибки, узнавание быстрее (Марикс: 133 -> 23 с, Фомичев: 33 -> 13 с, Радаев: 60 -> 40 с).
+/// Строже похожесть (0.80) не брать: на «АБ Техничке» Радаев узнавался бы через 18 минут вместо минуты.
+const LIVE_MIN_VOICE_SEC: f32 = 10.0;
 /// Выучиваем прошлые встречи только с 23.09.2026: раньше разметка собеседников была
 /// испорчена (см. журнал 2026-09-23-diarization-quality), имена там висят на смесях голосов.
 const LEARN_SINCE: &str = "2026-09-23";
@@ -50,9 +56,25 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 /// Возвращает только уверенные пары (номер, имя, похожесть): не меньше MATCH_MIN и с отрывом
 /// MATCH_MARGIN от второго профиля. Одно имя - одному собеседнику и наоборот (лучшие первыми).
 pub fn match_profiles(voices: &[(usize, Vec<f32>, f32)], profiles: &[(String, Vec<f32>)]) -> Vec<(usize, String, f32)> {
+    match_profiles_with(voices, profiles, MIN_VOICE_SEC, MATCH_MIN, MATCH_MARGIN)
+}
+
+/// Узнавание во время записи: те же пороги похожести, но хватает 10 с речи.
+pub fn match_profiles_live(voices: &[(usize, Vec<f32>, f32)], profiles: &[(String, Vec<f32>)]) -> Vec<(usize, String, f32)> {
+    match_profiles_with(voices, profiles, LIVE_MIN_VOICE_SEC, MATCH_MIN, MATCH_MARGIN)
+}
+
+/// То же с заданными порогами (для проверочных прогонов на записанных встречах).
+pub fn match_profiles_with(
+    voices: &[(usize, Vec<f32>, f32)],
+    profiles: &[(String, Vec<f32>)],
+    min_sec: f32,
+    min_sim: f32,
+    margin: f32,
+) -> Vec<(usize, String, f32)> {
     let mut cands: Vec<(usize, String, f32)> = Vec::new();
     for (n, c, sec) in voices {
-        if *sec < MIN_VOICE_SEC || c.is_empty() {
+        if *sec < min_sec || c.is_empty() {
             continue;
         }
         let mut sims: Vec<(f32, &str)> = profiles
@@ -63,7 +85,7 @@ pub fn match_profiles(voices: &[(usize, Vec<f32>, f32)], profiles: &[(String, Ve
         sims.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         if let Some(&(best, name)) = sims.first() {
             let second = sims.get(1).map(|s| s.0).unwrap_or(0.0);
-            if best >= MATCH_MIN && best - second >= MATCH_MARGIN {
+            if best >= min_sim && best - second >= margin {
                 cands.push((*n, name.to_string(), best));
             }
         }
@@ -389,6 +411,17 @@ mod tests {
         let m = match_profiles(&voices, &profiles);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].0, 2);
+    }
+
+    #[test]
+    fn live_recognizes_after_ten_seconds_save_after_twenty() {
+        let anna = unit(vec![1.0, 0.0, 0.0]);
+        let profiles = vec![("Анна".to_string(), anna.clone()), ("Дима".to_string(), unit(vec![0.0, 1.0, 0.0]))];
+        let voices = vec![(1, unit(vec![0.95, 0.1, 0.1]), 12.0)];
+        assert_eq!(match_profiles_live(&voices, &profiles).len(), 1);
+        assert!(match_profiles(&voices, &profiles).is_empty());
+        let short = vec![(1, unit(vec![0.95, 0.1, 0.1]), 8.0)];
+        assert!(match_profiles_live(&short, &profiles).is_empty());
     }
 
     #[test]
