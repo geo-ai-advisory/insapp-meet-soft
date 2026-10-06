@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Cloud, CloudOff } from "lucide-react";
+import { Cloud, CloudOff, Laptop } from "lucide-react";
 
 const STORAGE_KEY = "insapp_upload_to_cloud";
 const EVENT = "upload-optin-changed";
@@ -48,7 +48,11 @@ export function useServerAutoUpload(): boolean | null {
   return on;
 }
 
-/** Шапка экрана записи: «На сервер» / «Только на компьютере» рядом с «Внутренняя / Внешняя». */
+/**
+ * Шапка экрана записи: рубильник «куда уйдёт встреча» значками - слева компьютер, справа облако,
+ * бегунок стоит на выбранном (Geo 06.10: «нужен рубильник, иначе не понятно, какой статус - на сервер
+ * уходит или локально, и просто значками»). Облако - встреча уйдёт на сервер, компьютер - останется здесь.
+ */
 export function UploadChip() {
   const [on, set] = useUploadOptIn();
   const global = useServerAutoUpload();
@@ -57,21 +61,31 @@ export function UploadChip() {
   const title = off
     ? "Отправка на сервер выключена в настройках - встреча останется на этом компьютере"
     : sending
-      ? "После встречи запись уйдёт на сервер Insapp. Нажмите, чтобы оставить её только на этом компьютере"
-      : "Встреча останется только на этом компьютере. Нажмите, чтобы отправить на сервер";
+      ? "Встреча уйдёт на сервер Insapp. Переключите, чтобы оставить её только на этом компьютере"
+      : "Встреча останется только на этом компьютере. Переключите, чтобы отправить на сервер";
   return (
     <button
       type="button"
-      onClick={() => set(!on)}
-      disabled={off}
-      aria-pressed={sending}
+      role="switch"
+      aria-checked={sending}
+      aria-label={sending ? "Встреча уйдёт на сервер" : "Встреча останется только на этом компьютере"}
       title={title}
-      className={`inline-flex h-[30px] items-center gap-1.5 rounded-[15px] px-3 text-[12.5px] font-semibold transition-colors duration-200 disabled:cursor-default disabled:opacity-60 ${
-        sending ? "bg-im-tone text-im-on-tone hover:bg-im-tone-h" : "bg-im-bg text-im-ink2 hover:bg-im-tray-h"
+      disabled={off}
+      onClick={() => set(!on)}
+      className={`relative h-[30px] w-[62px] flex-none rounded-[15px] transition-colors duration-200 disabled:cursor-default disabled:opacity-60 ${
+        sending ? "bg-im-tone hover:bg-im-tone-h" : "bg-im-bg hover:bg-im-tray-h"
       }`}
     >
-      {sending ? <Cloud className="h-3.5 w-3.5" strokeWidth={2.4} /> : <CloudOff className="h-3.5 w-3.5" strokeWidth={2.4} />}
-      {off ? "Отправка выключена" : sending ? "На сервер" : "Только локально"}
+      <Laptop className="absolute left-[9px] top-[8px] h-3.5 w-3.5 text-im-mut2" strokeWidth={2.2} aria-hidden="true" />
+      <Cloud className="absolute right-[9px] top-[8px] h-3.5 w-3.5 text-im-mut2" strokeWidth={2.2} aria-hidden="true" />
+      <span
+        aria-hidden="true"
+        className={`absolute left-[3px] top-[3px] grid h-6 w-[26px] place-items-center rounded-full bg-white shadow-[0_1px_3px_rgba(16,24,40,.18)] transition-transform duration-200 ${
+          sending ? "translate-x-[30px]" : "translate-x-0"
+        }`}
+      >
+        {sending ? <Cloud className="h-3.5 w-3.5 text-im-acc" strokeWidth={2.4} /> : <Laptop className="h-3.5 w-3.5 text-im-ink2" strokeWidth={2.4} />}
+      </span>
     </button>
   );
 }
