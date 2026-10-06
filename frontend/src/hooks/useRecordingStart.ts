@@ -8,6 +8,7 @@ import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { resetLiveSpeakerNames } from '@/hooks/useSpeakerNames';
+import { resetUploadOptIn } from '@/components/UploadOptInToggle';
 import { toast } from 'sonner';
 
 interface UseRecordingStartReturn {
@@ -123,6 +124,7 @@ export function useRecordingStart(
       console.log('Starting backend recording with meeting:', randomTitle);
       // Новая запись - имена голосов с прошлой (несохранённой) записи не переносим.
       resetLiveSpeakerNames();
+      resetUploadOptIn(); // «только на компьютере» - выбор для одной встречи
       await recordingService.startRecordingWithDevices(
         selectedDevices?.micDevice || null,
         selectedDevices?.systemDevice || null,
@@ -194,6 +196,7 @@ export function useRecordingStart(
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
             // Новая запись - имена голосов с прошлой (несохранённой) записи не переносим.
             resetLiveSpeakerNames();
+            resetUploadOptIn(); // «только на компьютере» - выбор для одной встречи
             const result = await recordingService.startRecordingWithDevices(
               selectedDevices?.micDevice || null,
               selectedDevices?.systemDevice || null,
@@ -283,6 +286,7 @@ export function useRecordingStart(
         console.log('Starting backend recording with meeting:', generatedMeetingTitle);
         // Новая запись - имена голосов с прошлой (несохранённой) записи не переносим.
         resetLiveSpeakerNames();
+        resetUploadOptIn(); // «только на компьютере» - выбор для одной встречи
         const result = await recordingService.startRecordingWithDevices(
           selectedDevices?.micDevice || null,
           selectedDevices?.systemDevice || null,

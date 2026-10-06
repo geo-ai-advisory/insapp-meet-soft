@@ -14,6 +14,7 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { useSpeakerNames } from '@/hooks/useSpeakerNames';
 import { useSummaryReadiness } from '@/hooks/useSummaryJobs';
+import { UploadChip } from '@/components/UploadOptInToggle';
 import { defaultMeetingName, formatKickDate, initialsOf, isAutoMeetingTitle } from '@/lib/meetingFormat';
 import { MergedStat, ME_LABEL, MIN_VISIBLE_SHARE, computeSpeakerStats, formatSpeech, isAutoLabel, mergeStatsByLabel, roundShares } from '@/lib/speakerStats';
 import { Avatar, Dot, FlatBar, RecDot, Wave, useElementWidth } from './primitives';
@@ -165,6 +166,8 @@ export function LiveView({
               );
             })}
           </div>
+          {/* Отправлять ли эту встречу на сервер - видно и меняется прямо во время записи (Geo 06.10) */}
+          <UploadChip />
         </div>
 
         <div className="min-h-0 flex-1">

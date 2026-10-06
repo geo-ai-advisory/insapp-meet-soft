@@ -514,7 +514,6 @@ export default function UnifiedHome() {
         open={showSaveModal}
         defaultName={isAutoMeetingTitle(meetingTitle) ? defaultMeetingName(startedAt ?? new Date()) : meetingTitle}
         defaultType={liveType}
-        willUpload={typeof window !== 'undefined' ? sessionStorage.getItem('insapp_upload_to_cloud') !== 'false' : true}
         onCancel={() => setShowSaveModal(false)}
         onConfirm={handleConfirmSave}
         onDiscard={handleDiscard}

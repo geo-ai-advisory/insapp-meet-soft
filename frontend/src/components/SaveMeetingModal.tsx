@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Check, Trash2 } from 'lucide-react';
+import { Check, Cloud, CloudOff, Trash2 } from 'lucide-react';
+import { useServerAutoUpload, useUploadOptIn } from '@/components/UploadOptInToggle';
 
 /**
  * Окно «Сохранить встречу» - всплывает при нажатии «Стоп» (как #bStopModal в макете
@@ -15,7 +16,6 @@ export function SaveMeetingModal({
   open,
   defaultName,
   defaultType = 'in',
-  willUpload = true,
   onCancel,
   onConfirm,
   onDiscard,
@@ -23,7 +23,6 @@ export function SaveMeetingModal({
   open: boolean;
   defaultName: string;
   defaultType?: 'in' | 'out';
-  willUpload?: boolean;
   onCancel: () => void;
   onConfirm: (name: string, type: 'in' | 'out') => void;
   onDiscard?: () => void;
@@ -31,6 +30,10 @@ export function SaveMeetingModal({
   const [name, setName] = useState(defaultName);
   const [type, setType] = useState<'in' | 'out'>(defaultType);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Отправить ли на сервер - тот же выбор, что в шапке записи и в плашке (переключается и здесь).
+  const [choice, setUpload] = useUploadOptIn();
+  const serverOff = useServerAutoUpload() === false; // выключено в настройках - эта встреча тоже не уйдёт
+  const upload = choice && !serverOff;
 
   // Сбросить поля при каждом открытии.
   useEffect(() => {
@@ -154,27 +157,30 @@ export function SaveMeetingModal({
             </div>
           </div>
 
-          {/* Куда уйдёт */}
-          <div className="flex items-center gap-2.5 rounded-xl bg-secondary px-3.5 py-2.5 text-[12.5px] text-muted-foreground">
-            <span className="flex-shrink-0 text-muted-foreground">
-              {willUpload ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M7 18a5 5 0 01-.5-10A6 6 0 0118 9a4 4 0 011 7.9" /><path d="M12 11v7M9 15l3 3 3-3" />
-                </svg>
+          {/* Куда уйдёт - переключается прямо здесь */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={upload}
+            onClick={() => setUpload(!choice)}
+            disabled={serverOff}
+            title={serverOff ? 'Отправка на сервер выключена в настройках' : undefined}
+            className="flex w-full items-center gap-2.5 rounded-xl bg-secondary px-3.5 py-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:bg-accent disabled:cursor-default disabled:hover:bg-secondary"
+          >
+            <span className="flex-shrink-0">
+              {upload ? <Cloud className="h-[18px] w-[18px]" strokeWidth={1.75} /> : <CloudOff className="h-[18px] w-[18px]" strokeWidth={1.75} />}
+            </span>
+            <span className="flex-1">
+              {upload ? (
+                <>После сохранения встреча уйдёт на <b className="font-semibold text-foreground">сервер Insapp</b></>
               ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="4" width="18" height="8" rx="2" /><rect x="3" y="12" width="18" height="8" rx="2" /><path d="M7 8h.01M7 16h.01" />
-                </svg>
+                <>Сохранится <b className="font-semibold text-foreground">только на этом компьютере</b></>
               )}
             </span>
-            <span>
-              {willUpload ? (
-                <>После сохранения встреча уйдёт в <b className="font-semibold text-foreground">облако Insapp</b></>
-              ) : (
-                <>Сохранится <b className="font-semibold text-foreground">локально</b> на вашем Mac</>
-              )}
+            <span className={`relative h-5 w-[34px] flex-shrink-0 rounded-full transition-colors ${upload ? 'bg-primary' : 'bg-border'}`} aria-hidden="true">
+              <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform duration-150 ${upload ? 'translate-x-[14px]' : 'translate-x-0'}`} />
             </span>
-          </div>
+          </button>
         </div>
 
         {/* Кнопки */}
