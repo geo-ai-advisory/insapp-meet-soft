@@ -20,7 +20,7 @@ import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import {
-  Check, ChevronDown, Cloud, CloudOff, Copy, Download, Folder, Link2, Loader2, Pencil, RotateCw,
+  Building2, Check, ChevronDown, Cloud, CloudOff, Copy, Download, Folder, Handshake, Link2, Loader2, Pencil, RotateCw,
   Search, Send, Sparkles, X,
 } from 'lucide-react';
 import { Summary, TranscriptSegmentData } from '@/types';
@@ -314,6 +314,9 @@ export function MeetingView({
                 className="inline-flex h-7 items-center gap-0.5 rounded-lg text-[13px] font-medium text-im-mut transition-colors hover:text-im-on-tone data-[state=open]:text-im-on-tone"
                 title="Тип встречи: внутренняя или внешняя"
               >
+                {meetingType === 'external'
+                  ? <Handshake className="mr-1 h-4 w-4" aria-hidden="true" />
+                  : <Building2 className="mr-1 h-4 w-4" aria-hidden="true" />}
                 {meetingType === 'external' ? 'Внешняя' : 'Внутренняя'}
                 <ChevronDown className="h-4 w-4" />
               </button>
@@ -326,6 +329,7 @@ export function MeetingView({
                   className="flex h-9 cursor-pointer items-center gap-2.5 rounded-[10px] px-3 text-[14px] text-im-ink focus:bg-im-bg"
                 >
                   <span className="grid w-4 place-items-center text-im-acc">{meetingType === k && <Check className="h-4 w-4" />}</span>
+                  {k === 'internal' ? <Building2 className="h-4 w-4 text-im-mut" aria-hidden="true" /> : <Handshake className="h-4 w-4 text-im-mut" aria-hidden="true" />}
                   {k === 'internal' ? 'Внутренняя' : 'Внешняя'}
                 </DropdownMenuItem>
               ))}

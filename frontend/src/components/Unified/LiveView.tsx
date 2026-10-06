@@ -8,7 +8,8 @@
  */
 
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Copy, Pencil, Sparkles } from 'lucide-react';
+import { Building2, ChevronDown, Copy, Handshake, Pencil, Sparkles } from 'lucide-react';
+import { IconSwitch } from '@/components/IconSwitch';
 import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
@@ -147,25 +148,17 @@ export function LiveView({
             <RecDot />{paused ? 'На паузе' : 'Идёт запись'}
           </span>
           {startText && <><Dot /><span>{startText}</span></>}
-          <div className="inline-flex gap-0.5" role="group" aria-label="Тип встречи">
-            {(['in', 'out'] as const).map((k, i) => {
-              const on = meetingType === k;
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => onMeetingTypeChange(k)}
-                  className={`inline-flex h-[30px] items-center gap-1 px-3 text-[12.5px] font-semibold transition-[border-radius,background] duration-300 ${
-                    on ? 'rounded-[15px] bg-im-acc text-white' : `bg-im-bg text-im-ink2 hover:bg-im-tray-h ${i === 0 ? 'rounded-[15px_6px_6px_15px]' : 'rounded-[6px_15px_15px_6px]'}`
-                  }`}
-                >
-                  {on && <Check className="h-3.5 w-3.5" strokeWidth={2.5} />}
-                  {k === 'in' ? 'Внутренняя' : 'Внешняя'}
-                </button>
-              );
-            })}
-          </div>
+          {/* Тип встречи - рубильник значками: офис - внутренняя, рукопожатие - внешняя (Geo 06.10) */}
+          <IconSwitch
+            right={meetingType === 'out'}
+            onToggle={() => onMeetingTypeChange(meetingType === 'out' ? 'in' : 'out')}
+            Left={Building2}
+            Right={Handshake}
+            label={meetingType === 'out' ? 'Внешняя встреча' : 'Внутренняя встреча'}
+            title={meetingType === 'out'
+              ? 'Внешняя встреча - с партнёром. Переключите, если встреча внутренняя'
+              : 'Внутренняя встреча - внутри команды. Переключите, если встреча с партнёром'}
+          />
           {/* Отправлять ли эту встречу на сервер - видно и меняется прямо во время записи (Geo 06.10) */}
           <UploadChip />
         </div>

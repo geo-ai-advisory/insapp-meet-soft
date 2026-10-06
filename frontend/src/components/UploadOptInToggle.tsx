@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Cloud, CloudOff, Laptop } from "lucide-react";
+import { IconSwitch } from "@/components/IconSwitch";
 
 const STORAGE_KEY = "insapp_upload_to_cloud";
 const EVENT = "upload-optin-changed";
@@ -64,29 +65,17 @@ export function UploadChip() {
       ? "Встреча уйдёт на сервер Insapp. Переключите, чтобы оставить её только на этом компьютере"
       : "Встреча останется только на этом компьютере. Переключите, чтобы отправить на сервер";
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={sending}
-      aria-label={sending ? "Встреча уйдёт на сервер" : "Встреча останется только на этом компьютере"}
+    <IconSwitch
+      right={sending}
+      onToggle={() => set(!on)}
+      Left={Laptop}
+      Right={Cloud}
+      label={sending ? "Встреча уйдёт на сервер" : "Встреча останется только на этом компьютере"}
       title={title}
+      tintRight
+      leftActive="text-im-ink2"
       disabled={off}
-      onClick={() => set(!on)}
-      className={`relative h-[30px] w-[62px] flex-none rounded-[15px] transition-colors duration-200 disabled:cursor-default disabled:opacity-60 ${
-        sending ? "bg-im-tone hover:bg-im-tone-h" : "bg-im-bg hover:bg-im-tray-h"
-      }`}
-    >
-      <Laptop className="absolute left-[9px] top-[8px] h-3.5 w-3.5 text-im-mut2" strokeWidth={2.2} aria-hidden="true" />
-      <Cloud className="absolute right-[9px] top-[8px] h-3.5 w-3.5 text-im-mut2" strokeWidth={2.2} aria-hidden="true" />
-      <span
-        aria-hidden="true"
-        className={`absolute left-[3px] top-[3px] grid h-6 w-[26px] place-items-center rounded-full bg-white shadow-[0_1px_3px_rgba(16,24,40,.18)] transition-transform duration-200 ${
-          sending ? "translate-x-[30px]" : "translate-x-0"
-        }`}
-      >
-        {sending ? <Cloud className="h-3.5 w-3.5 text-im-acc" strokeWidth={2.4} /> : <Laptop className="h-3.5 w-3.5 text-im-ink2" strokeWidth={2.4} />}
-      </span>
-    </button>
+    />
   );
 }
 
