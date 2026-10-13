@@ -49,6 +49,13 @@ pub struct ParakeetModel {
     vocab: Vec<String>,
     blank_idx: i32,
     vocab_size: usize,
+    /// Как шагать по кадрам (стенд сравнения моделей, examples/asr_compare.rs):
+    /// 0 - как в приложении: длительности TDT не читаются, кадр меняется только после «пусто»;
+    /// 1 - на предсказанную длительность (как NeMo и onnx-asr);
+    /// 2 - длительность > 0 значит «этот кадр закончен»: шаг на один кадр;
+    /// 3 - как 0, но тот же токен второй раз на том же кадре не пишется, кадр меняется;
+    /// 4 - как 3, но с третьего раза.
+    step_mode: u8,
 }
 
 impl Drop for ParakeetModel {
@@ -79,7 +86,13 @@ impl ParakeetModel {
             vocab,
             blank_idx,
             vocab_size,
+            step_mode: 0,
         })
+    }
+
+    /// Режим шага по кадрам (см. поле `step_mode`).
+    pub fn set_step_mode(&mut self, mode: u8) {
+        self.step_mode = mode;
     }
 
     fn init_session<P: AsRef<Path>>(
@@ -389,15 +402,45 @@ impl ParakeetModel {
                 .map(|(idx, _)| idx as i32)
                 .unwrap_or(self.blank_idx);
 
-            if token != self.blank_idx {
+            // TDT: хвост выхода - на сколько кадров шагнуть после этого решения (0..4).
+            let duration = if self.step_mode != 0 && probs.len() > self.vocab_size {
+                vocab_logits_slice[self.vocab_size..]
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+
+            // Режим 3: тот же токен второй раз на том же кадре - зацикливание, а не речь.
+            // Режим 4: то же, но с третьего раза (слово, сказанное дважды подряд, остаётся).
+            let same_on_frame = tokens
+                .iter()
+                .rev()
+                .zip(timestamps.iter().rev())
+                .take_while(|(tok, ts)| **tok == token && **ts == t)
+                .count();
+            let stuck = token != self.blank_idx
+                && ((self.step_mode == 3 && same_on_frame >= 1) || (self.step_mode == 4 && same_on_frame >= 2));
+
+            if token != self.blank_idx && !stuck {
                 prev_state = new_state;
                 tokens.push(token);
                 timestamps.push(t);
                 emitted_tokens += 1;
             }
 
-            // Step logic from Python - simplified since step is always -1
-            if token == self.blank_idx || emitted_tokens == MAX_TOKENS_PER_STEP {
+            let step = match self.step_mode {
+                1 => duration,
+                2 => duration.min(1),
+                _ => 0,
+            };
+            if step > 0 {
+                t += step;
+                emitted_tokens = 0;
+            } else if stuck || token == self.blank_idx || emitted_tokens == MAX_TOKENS_PER_STEP {
                 t += 1;
                 emitted_tokens = 0;
             }
