@@ -7,7 +7,7 @@
 //! как реплика в приложении.
 //!
 //! Запуск: asr_compare <папка модели> <итог.json> <звук f32le 16 кГц моно>...
-//!   ASR_STEP=0..3 - режим шага по кадрам (ParakeetModel::set_step_mode): 0 - как сейчас в приложении,
+//!   ASR_STEP=0..4 - режим шага по кадрам (ParakeetModel::set_step_mode), по умолчанию 3 - как в приложении; 0 - как было до 0.4.11,
 //!   1 - по длительностям TDT, 2 - длительность > 0 = шаг на кадр, 3 - как 0 без повтора токена на кадре.
 //!   ffmpeg -i audio.mp4 -ss 0 -t 600 -ac 1 -ar 16000 -f f32le clip.f32
 use app_lib::parakeet_engine::ParakeetModel;
@@ -60,7 +60,7 @@ fn main() {
     let (model_dir, out) = (&a[1], &a[2]);
     let started = Instant::now();
     let mut model = ParakeetModel::new(model_dir, true).expect("модель не загрузилась");
-    let step_mode: u8 = std::env::var("ASR_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let step_mode: u8 = std::env::var("ASR_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
     model.set_step_mode(step_mode);
     let load_sec = started.elapsed().as_secs_f64();
 
