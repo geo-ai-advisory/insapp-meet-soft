@@ -83,10 +83,17 @@ pub struct AiSummarySettings {
     /// Сразу после завершения встречи делать резюме в фоне (только Claude).
     #[serde(default)]
     pub auto_summary: bool,
+    /// Перед резюме вычитывать расшифровку (transcript_polish): термины, имена, мусор, паразиты.
+    #[serde(default = "default_true")]
+    pub polish: bool,
 }
 
 fn default_summary_model() -> String {
     "sonnet".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AiSummarySettings {
@@ -102,6 +109,7 @@ impl Default for AiSummarySettings {
             use_print_mode: true,
             model: default_summary_model(),
             auto_summary: false,
+            polish: true,
         }
     }
 }
@@ -328,8 +336,9 @@ pub async fn ai_summary_start<R: Runtime>(
 
     // 1. Достаём транскрипт из БД
     let transcript_rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
-        "SELECT transcript, timestamp, audio_start_time, audio_end_time
-         FROM transcripts WHERE meeting_id = ? ORDER BY audio_start_time ASC NULLS LAST, timestamp ASC",
+        "SELECT COALESCE(polished, transcript), timestamp, audio_start_time, audio_end_time
+         FROM transcripts WHERE meeting_id = ? AND COALESCE(polished, transcript) <> ''
+         ORDER BY audio_start_time ASC NULLS LAST, timestamp ASC",
     )
     .bind(&meeting_id)
     .fetch_all(pool)
@@ -943,8 +952,9 @@ async fn prepare_transcript_file<R: Runtime>(
     pool: &SqlitePool,
     meeting_id: &str,
 ) -> Result<(PathBuf, String), String> {
+    // Текст - вычитанный, если вычитка была (см. transcript_polish).
     let rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
-        "SELECT transcript, timestamp, audio_start_time, audio_end_time
+        "SELECT COALESCE(polished, transcript), timestamp, audio_start_time, audio_end_time
          FROM transcripts WHERE meeting_id = ? ORDER BY audio_start_time ASC NULLS LAST, timestamp ASC",
     )
     .bind(meeting_id)
@@ -974,7 +984,7 @@ async fn prepare_transcript_file<R: Runtime>(
             .into_iter()
             .collect();
     let speakers: Vec<(String, Option<String>)> = sqlx::query_as::<_, (String, Option<String>)>(
-        "SELECT transcript, speaker FROM transcripts WHERE meeting_id = ?
+        "SELECT COALESCE(polished, transcript), speaker FROM transcripts WHERE meeting_id = ?
          ORDER BY audio_start_time ASC NULLS LAST, timestamp ASC",
     )
     .bind(meeting_id)
@@ -992,7 +1002,10 @@ async fn prepare_transcript_file<R: Runtime>(
     for (i, (text, ts, start, _end)) in rows.iter().enumerate() {
         // Реплики из одних слов-паразитов («Uh.», «Um») и обрывки латиницей в русской встрече
         // резюме не нужны - это шум распознавания.
-        if crate::audio::fillers::is_filler_only(text) || (russian && crate::audio::fillers::is_latin_snippet(text)) {
+        if text.trim().is_empty()
+            || crate::audio::fillers::is_filler_only(text)
+            || (russian && crate::audio::fillers::is_latin_snippet(text))
+        {
             continue;
         }
         let stamp = start
@@ -1195,6 +1208,13 @@ pub async fn start_summary_job<R: Runtime>(
 
     tauri::async_runtime::spawn(async move {
         let mid = running.meeting_id.clone();
+        // Вычитка расшифровки (Geo 14.10) - параллельно с резюме, резюме её не ждёт.
+        let polish = {
+            let (app, pool, mid, settings) = (app.clone(), pool.clone(), mid.clone(), settings.clone());
+            tauri::async_runtime::spawn(async move {
+                crate::transcript_polish::polish_with_events(&app, &pool, &mid, &settings).await
+            })
+        };
         let result = match prepare_transcript_file(&app, &pool, &mid).await {
             Ok((file, t)) => {
                 let r = run_cli_once(&settings, &file, &t, false).await;
@@ -1224,6 +1244,10 @@ pub async fn start_summary_job<R: Runtime>(
             }
         }
         let _ = app.emit("summary-job", done);
+        // Вычитка что-то поменяла - расшифровка на сервере устарела, отправляем заново.
+        if polish.await.unwrap_or(false) {
+            crate::transcript_polish::upload_polished(&pool, &mid).await;
+        }
     });
     Ok(())
 }
@@ -1362,18 +1386,19 @@ fn cwd_of_session(file: &std::path::Path) -> Option<PathBuf> {
 }
 
 /// Одна попытка запуска CLI резюме.
-struct CliAttempt {
+#[derive(Clone)]
+pub(crate) struct CliAttempt {
     cmd: String,
-    args: Vec<String>,
+    pub(crate) args: Vec<String>,
     /// Папка запуска: None - как у приложения.
     cwd: Option<PathBuf>,
-    label: &'static str,
+    pub(crate) label: &'static str,
     /// Запуск с памятью пользователя - после него сверка имён и терминов по памяти.
     with_memory: bool,
 }
 
 /// Попытки запуска: сначала «с памятью пользователя», при быстром отказе - прежний режим без неё.
-fn summary_attempts(settings: &AiSummarySettings, transcript_dir: &str, memory_dir: Option<PathBuf>) -> Vec<CliAttempt> {
+pub(crate) fn summary_attempts(settings: &AiSummarySettings, transcript_dir: &str, memory_dir: Option<PathBuf>) -> Vec<CliAttempt> {
     let home_or_memory = memory_dir.or_else(dirs::home_dir);
     let model = settings.model.trim().to_string();
     let with_model = |mut a: Vec<String>| {
@@ -1544,7 +1569,7 @@ async fn run_cli_once(
 }
 
 /// Один запуск CLI: промпт во входной поток, ответ - из stdout.
-async fn run_cli_attempt(a: &CliAttempt, prompt: &str, track_pid: bool) -> Result<String, String> {
+pub(crate) async fn run_cli_attempt(a: &CliAttempt, prompt: &str, track_pid: bool) -> Result<String, String> {
     let cmd = &a.cmd;
     // Промпт передаём ЧЕРЕЗ ВХОДНОЙ ПОТОК, а не аргументом: он многострочный,
     // и как аргумент обрезался - CLI отвечал «нет входных данных».

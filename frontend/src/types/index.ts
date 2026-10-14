@@ -18,6 +18,8 @@ export interface Transcript {
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
   // Источник речи: "mic" (Вы) | "system" (Собеседник) | undefined (без разделения).
   speaker?: string;
+  /** Как распознано - только у реплик, которые поправила вычитка Claude (text - вычитанный, "" - убрана как мусор). */
+  original?: string;
 }
 
 export interface TranscriptUpdate {
@@ -113,4 +115,6 @@ export interface TranscriptSegmentData {
   confidence?: number;
   /** Кто говорит: "mic" (Вы) | "system_N" (собеседник N) | undefined (без разделения). */
   speaker?: string;
+  /** Как распознано - только у реплик, которые поправила вычитка Claude (text - вычитанный, "" - убрана как мусор). */
+  original?: string;
 }

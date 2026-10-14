@@ -215,8 +215,9 @@ impl MeetingsRepository {
             let meeting_transcripts = transcripts
                 .into_iter()
                 .map(|t| MeetingTranscript {
+                    original: t.original_if_polished(),
+                    text: t.effective_text().to_string(),
                     id: t.id,
-                    text: t.transcript,
                     timestamp: t.timestamp,
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,

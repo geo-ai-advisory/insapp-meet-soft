@@ -61,6 +61,7 @@ pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
+pub mod transcript_polish;
 pub mod utils;
 pub mod whisper_engine;
 

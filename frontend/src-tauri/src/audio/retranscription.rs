@@ -438,6 +438,12 @@ async fn run_retranscription<R: Runtime>(
         .execute(&mut *tx)
         .await
         .map_err(|e| anyhow!("Failed to delete existing transcripts: {}", e))?;
+    // Реплики новые - прежняя вычитка (transcript_polish) к ним не относится.
+    sqlx::query("UPDATE meetings SET polished_at = NULL WHERE id = ?")
+        .bind(&meeting_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to reset polish mark: {}", e))?;
 
     for segment in &segments {
         sqlx::query(

@@ -382,7 +382,8 @@ export function useSummaryGeneration({
       }) as { transcripts: Transcript[]; total_count: number; has_more: boolean };
 
       console.log(`✅ Fetched ${allData.transcripts.length} transcripts from database`);
-      return withoutNoise(allData.transcripts);
+      // Реплики, которые вычитка убрала как мусор (пустой текст), не берём.
+      return withoutNoise(allData.transcripts).filter((t) => (t.text || '').trim());
     } catch (error) {
       console.error('❌ Error fetching all transcripts:', error);
       toast.error('Failed to fetch transcripts for summary generation');

@@ -50,7 +50,8 @@ export function useCopyOperations({
       }) as { transcripts: Transcript[]; total_count: number; has_more: boolean };
 
       console.log(`✅ Fetched ${allData.transcripts.length} transcripts from database for copying`);
-      return withoutNoise(allData.transcripts);
+      // Реплики, которые вычитка убрала как мусор (пустой текст), не берём.
+      return withoutNoise(allData.transcripts).filter((t) => (t.text || '').trim());
     } catch (error) {
       console.error('❌ Error fetching all transcripts:', error);
       toast.error('Не удалось получить расшифровку для копирования');

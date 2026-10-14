@@ -302,10 +302,18 @@ export function MeetingData({
         fetchMeetingSummary();
       }
     }).then((fn) => { if (alive) unlisten = fn; else fn(); });
+    // Вычитка расшифровки закончилась в фоне - перечитываем реплики.
+    let unlistenPolish: UnlistenFn | null = null;
+    listen<{ meeting_id: string }>('transcript-polished', (event) => {
+      if (event.payload?.meeting_id === meetingId) {
+        refetch();
+      }
+    }).then((fn) => { if (alive) unlistenPolish = fn; else fn(); });
 
     return () => {
       alive = false;
       if (unlisten) unlisten();
+      if (unlistenPolish) unlistenPolish();
     };
   }, [meetingId]);
 

@@ -21,7 +21,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import {
   Building2, Check, ChevronDown, Cloud, CloudOff, Copy, Download, Folder, Handshake, Link2, Loader2, Pencil, RotateCw,
-  Search, Send, Sparkles, X,
+  Search, Send, Sparkles, X, WandSparkles,
 } from 'lucide-react';
 import { Summary, TranscriptSegmentData } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -80,7 +80,7 @@ function useAllSegments(meetingId: string, segments: TranscriptSegmentData[], ha
         if (!alive || !res?.transcripts) return;
         setAll(withoutNoise(res.transcripts as any[]).map((t: any) => ({
           id: t.id, timestamp: t.audio_start_time ?? 0, endTime: t.audio_end_time, text: t.text,
-          confidence: t.confidence, speaker: t.speaker,
+          confidence: t.confidence, speaker: t.speaker, original: t.original,
         })));
       })
       .catch(() => {});
@@ -624,14 +624,28 @@ function TranscriptSheet({
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // Вычитка Claude (Geo 14.10): по умолчанию показываем вычитанный текст, «Как распознано» - исходный,
+  // вместе с репликами, которые вычитка убрала как мусор.
+  const [asRecognized, setAsRecognized] = useState(false);
+  const polishedCount = useMemo(() => allSegments.filter((s) => s.original !== undefined).length, [allSegments]);
+  const view = useMemo(() => {
+    const pick = (list: TranscriptSegmentData[]) => (asRecognized
+      ? list.map((s) => (s.original !== undefined ? { ...s, text: s.original } : s))
+      : list.filter((s) => (s.text || '').trim()));
+    return { segments: pick(segments), all: pick(allSegments) };
+  }, [asRecognized, segments, allSegments]);
   const q = query.trim().toLowerCase();
   const filtered = useMemo(
-    () => (q ? allSegments.filter((s) => (s.text || '').toLowerCase().includes(q)) : segments),
-    [q, allSegments, segments],
+    () => (q ? view.all.filter((s) => (s.text || '').toLowerCase().includes(q)) : view.segments),
+    [q, view],
   );
-  const sub = [durationText, speakersCount > 0 ? `${speakersCount} ${plural(speakersCount, 'участник', 'участника', 'участников')}` : '']
-    .filter(Boolean).join(' · ');
-  const iconBtn = 'grid h-9 w-9 flex-none place-items-center rounded-[18px] text-im-mut transition-[background,border-radius] duration-200 hover:bg-im-tray active:rounded-[10px]';
+  const sub = [
+    durationText,
+    speakersCount > 0 ? `${speakersCount} ${plural(speakersCount, 'участник', 'участника', 'участников')}` : '',
+    polishedCount > 0 ? (asRecognized ? 'как распознано' : 'вычитано') : '',
+  ].filter(Boolean).join(' · ');
+  const iconBase = 'grid h-9 w-9 flex-none place-items-center rounded-[18px] transition-[background,border-radius] duration-200 active:rounded-[10px]';
+  const iconBtn = `${iconBase} text-im-mut hover:bg-im-tray`;
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[28px] bg-im-sheet pt-3" aria-label="Расшифровка">
@@ -656,6 +670,20 @@ function TranscriptSheet({
             {sub && <span className="truncate text-[12.5px] text-im-mut">{sub}</span>}
             <span className="flex-1" />
           </>
+        )}
+        {polishedCount > 0 && !searchOpen && (
+          <button
+            type="button"
+            onClick={() => setAsRecognized((v) => !v)}
+            aria-pressed={!asRecognized}
+            className={asRecognized ? iconBtn : `${iconBase} bg-im-tone text-im-acc hover:bg-im-tone-h`}
+            title={asRecognized
+              ? 'Показан текст как распознано. Нажмите - вычитанный Claude'
+              : `Вычитано Claude: исправлено реплик - ${polishedCount}. Нажмите - как распознано`}
+            aria-label={asRecognized ? 'Показать вычитанный текст' : 'Показать как распознано'}
+          >
+            <WandSparkles className="h-[18px] w-[18px]" />
+          </button>
         )}
         <button
           type="button"

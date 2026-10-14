@@ -39,6 +39,7 @@ function convertTranscriptsToSegments(transcripts: Transcript[]): TranscriptSegm
         text: t.text,
         speaker: (t as any).speaker,
         confidence: t.confidence,
+        original: t.original,
     }));
 }
 

@@ -160,6 +160,10 @@ pub struct MeetingTranscript {
     // Источник речи: "mic" (Вы) | "system" (Собеседник) | None (без разделения).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<String>,
+    /// Как распознано - только у реплик, которые поправила вычитка (text тогда - вычитанный;
+    /// пустой text - реплика убрана как мусор).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<String>,
 }
 
 /// Meeting metadata without transcripts (for pagination)
@@ -939,8 +943,9 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
             let meeting_transcripts = transcripts
                 .into_iter()
                 .map(|t| MeetingTranscript {
+                    original: t.original_if_polished(),
+                    text: t.effective_text().to_string(),
                     id: t.id,
-                    text: t.transcript,
                     timestamp: t.timestamp,
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,

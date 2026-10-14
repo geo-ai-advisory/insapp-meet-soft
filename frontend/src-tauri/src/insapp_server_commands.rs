@@ -351,9 +351,15 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
     state: State<'_, AppState>,
     meeting_id: String,
 ) -> Result<serde_json::Value, String> {
-    use crate::database::repositories::meeting::MeetingsRepository;
+    upload_meeting_by_id(state.db_manager.pool(), meeting_id).await
+}
 
-    let pool = state.db_manager.pool();
+/// Выгрузка встречи на сервер без окна приложения (после вычитки расшифровки - см. transcript_polish).
+pub async fn upload_meeting_by_id(
+    pool: &sqlx::SqlitePool,
+    meeting_id: String,
+) -> Result<serde_json::Value, String> {
+    use crate::database::repositories::meeting::MeetingsRepository;
 
     // Уважаем выбор пользователя «только локально»: если при сохранении галочка
     // «Отправить в облако» была снята, встреча помечена cloud_opt_out=1 и НЕ должна
@@ -387,10 +393,12 @@ pub async fn insapp_upload_meeting_by_id<R: Runtime>(
         .map_err(|e| format!("Не удалось прочитать встречу: {}", e))?
         .ok_or_else(|| format!("Встреча {} не найдена", meeting_id))?;
 
-    // 2) Преобразуем в формат TranscriptSegment
+    // 2) Преобразуем в формат TranscriptSegment. Текст - вычитанный, если вычитка была;
+    // реплики, которые вычитка убрала как мусор (пустой текст), на сервер не идут.
     let segments: Vec<crate::api::TranscriptSegment> = meeting
         .transcripts
         .iter()
+        .filter(|t| !t.text.trim().is_empty())
         .map(|t| crate::api::TranscriptSegment {
             id: t.id.clone(),
             text: t.text.clone(),
@@ -768,6 +776,7 @@ pub async fn insapp_upload_all_meetings<R: Runtime>(
         let segments: Vec<crate::api::TranscriptSegment> = full
             .transcripts
             .iter()
+            .filter(|t| !t.text.trim().is_empty())
             .map(|t| crate::api::TranscriptSegment {
                 id: t.id.clone(),
                 text: t.text.clone(),

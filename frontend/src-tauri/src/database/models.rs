@@ -51,6 +51,24 @@ pub struct Transcript {
     // Источник речи: "mic" (Вы) | "system" (Собеседник) | NULL (без разделения).
     #[sqlx(default)]
     pub speaker: Option<String>,
+    // Вычитка Claude (см. transcript_polish): NULL - не правили, "" - реплика убрана как мусор.
+    #[sqlx(default)]
+    pub polished: Option<String>,
+}
+
+impl Transcript {
+    /// Текст для показа, резюме и сервера: вычитанный, если есть, иначе как распознано.
+    pub fn effective_text(&self) -> &str {
+        self.polished.as_deref().unwrap_or(&self.transcript)
+    }
+
+    /// Исходный текст распознавания - только если вычитка его изменила (для «Как распознано»).
+    pub fn original_if_polished(&self) -> Option<String> {
+        self.polished
+            .as_ref()
+            .filter(|p| p.as_str() != self.transcript)
+            .map(|_| self.transcript.clone())
+    }
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
