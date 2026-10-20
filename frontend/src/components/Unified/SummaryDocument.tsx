@@ -77,10 +77,42 @@ export function separateHeaderLines(markdown: string): string {
   return [...out, ...tail].join('\n');
 }
 
+/**
+ * Заголовок раздела: «## Итог» или строка со значком без решёток («🎯 Итог», «✅ Действия») - Claude пишет то так,
+ * то так; 20.10.2026 резюме «Презентация Альфа Афиши» без решёток слиплось в один текст (Geo: «слипаются блоки,
+ * недостаточно выделяются заголовки»). Строка со значком - заголовок, только если короткая, не пункт списка,
+ * без точки в конце и после пустой строки. Как IsSectionHeading на сервере (SharePage.cs).
+ */
+function isSectionHeading(lines: string[], i: number, titleIndex: number): boolean {
+  const t = lines[i].trim();
+  if (/^#{1,3}\s+/.test(t)) return true;
+  if (i <= titleIndex || t.length < 2 || t.length > 90 || /^([-*+•]|\d+[.)])\s/.test(t) || t.endsWith('.')) return false;
+  if (i > 0 && lines[i - 1].trim()) return false;
+  return !!splitEmoji(unbold(t)).emoji;
+}
+
+/**
+ * «Альфа-Банк:», «Insapp:» над пунктами - подпись стороны (рендерится плашкой через h6), а не абзац.
+ */
+function markSubLabels(md: string): string {
+  const lines = md.split('\n');
+  const isItem = (l: string) => /^\s*([-*+]|\d+[.)])\s+/.test(l);
+  return lines
+    .map((l, i) => {
+      const t = l.trim();
+      if (t.length > 60 || !t.endsWith(':') || t.slice(0, -1).includes(':') || isItem(l) || /^\s/.test(l)) return l;
+      const next = lines.slice(i + 1).find((x) => x.trim());
+      return next !== undefined && isItem(next) ? `###### ${t.slice(0, -1).trim()}` : l;
+    })
+    .join('\n');
+}
+
 export function parseSummary(markdown: string): ParsedSummary {
   const text = normalizeBullets(stripTitleH1(markdown || '').replace(/\r\n/g, '\n')).trim();
   const lines = text.split('\n');
-  const isHeading = (l: string) => /^#{1,3}\s+/.test(l);
+  // Первая непустая строка - заголовок резюме («🗓 О чём встреча»), разделом её не считаем.
+  const titleIndex = lines.findIndex((l) => l.trim());
+  const isHeading = (_l: string, i: number) => isSectionHeading(lines, i, titleIndex);
   const firstHeading = lines.findIndex(isHeading);
 
   const headerLines = (firstHeading === -1 ? lines : lines.slice(0, firstHeading));
@@ -117,18 +149,18 @@ export function parseSummary(markdown: string): ParsedSummary {
 
   const sections: Section[] = [];
   let cur: Section | null = null;
-  for (const line of rest) {
-    const h = /^#{1,3}\s+(.*)$/.exec(line);
-    if (h) {
+  rest.forEach((line, k) => {
+    if (isHeading(line, firstHeading + k)) {
       if (cur) sections.push(cur);
-      const { emoji, text: t } = splitEmoji(unbold(h[1]));
+      const h = /^#{1,3}\s+(.*)$/.exec(line.trim());
+      const { emoji, text: t } = splitEmoji(unbold(h ? h[1] : line.trim()));
       cur = { title: t, emoji, body: '', isItog: /итог/i.test(t) };
     } else if (cur) {
       cur.body += `${line}\n`;
     }
-  }
+  });
   if (cur) sections.push(cur);
-  sections.forEach((s) => { s.body = s.body.trim(); });
+  sections.forEach((s) => { s.body = markSubLabels(s.body.trim()); });
   return { title, meta, lead, sections };
 }
 
@@ -139,8 +171,20 @@ function openLink(href?: string) {
   });
 }
 
+/** Текст первого ребёнка абзаца - чтобы узнать строку-вывод «→ ...». */
+function startsWithArrow(children: React.ReactNode): boolean {
+  const first = React.Children.toArray(children)[0];
+  return typeof first === 'string' && /^\s*(→|->)/.test(first);
+}
+
+function dropArrow(children: React.ReactNode): React.ReactNode {
+  return React.Children.toArray(children).map((c, i) => (i === 0 && typeof c === 'string' ? c.replace(/^\s*(→|->)\s*/, '') : c));
+}
+
 const mdComponents: Components = {
-  p: ({ children }) => <p className="m-0 [&+*]:mt-2.5">{children}</p>,
+  p: ({ children }) => (startsWithArrow(children)
+    ? <p className="m-0 rounded-[14px] bg-im-tone px-3.5 py-2.5 text-im-on-tone [&+*]:mt-2.5">{dropArrow(children)}</p>
+    : <p className="m-0 [&+*]:mt-2.5">{children}</p>),
   strong: ({ children }) => <strong className="font-semibold text-im-ink">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   a: ({ href, children }) => (
@@ -165,7 +209,10 @@ const mdComponents: Components = {
   h3: ({ children }) => <h4 className="m-0 mt-3 text-[15.5px] font-bold leading-6 text-im-ink">{children}</h4>,
   h4: ({ children }) => <h4 className="m-0 mt-3 text-[15.5px] font-bold leading-6 text-im-ink">{children}</h4>,
   h5: ({ children }) => <h5 className="m-0 mt-3 text-[15px] font-semibold leading-6 text-im-ink">{children}</h5>,
-  h6: ({ children }) => <h6 className="m-0 mt-3 text-[15px] font-semibold leading-6 text-im-ink">{children}</h6>,
+  // h6 - подпись стороны («Альфа-Банк», «Insapp») над пунктами Действий (markSubLabels).
+  h6: ({ children }) => (
+    <h6 className="m-0 mt-[18px] inline-block rounded-[10px] bg-im-bg px-2.5 py-0.5 text-[13px] font-semibold leading-5 text-im-ink2 first:mt-0 [&+*]:mt-2">{children}</h6>
+  ),
   blockquote: ({ children }) => <blockquote className="m-0 border-l-2 border-im-line2 pl-3 text-im-mut">{children}</blockquote>,
   code: ({ children }) => <code className="rounded-md bg-im-tray px-1 py-px text-[0.92em]">{children}</code>,
   hr: () => <hr className="my-4 border-0 border-t border-im-line" />,
@@ -197,18 +244,22 @@ export function SummaryDocument({
         ) : <span className="flex-1" />}
         {headerAction}
       </div>
-      {doc.meta && <p className="m-0 mt-1.5 text-[13px] leading-[19px] text-im-mut">{doc.meta}</p>}
+      {doc.meta && <p className="m-0 mt-2 text-[13px] leading-[19px] text-im-mut">{doc.meta}</p>}
       {doc.lead && (
         <div className={`${doc.title ? 'mt-3.5' : ''} text-[16px] leading-[26px] text-im-ink2`}>
           <Md>{doc.lead}</Md>
         </div>
       )}
-      {doc.sections.map((s, i) => (
+      {doc.sections.map((s, i) => {
+        const prev = doc.sections[i - 1];
+        // Между обычными разделами - тонкая линия; после карточки «Итог» и у самой карточки линии нет.
+        const divided = !s.isItog && !!prev && !prev.isItog;
+        return (
         <section
           key={`${s.title}-${i}`}
-          className={`mt-[22px] text-[15.5px] leading-6 text-im-ink2 ${s.isItog ? 'rounded-[20px] bg-im-bg px-5 pb-[18px] pt-4' : ''}`}
+          className={`text-[15.5px] leading-6 text-im-ink2 ${prev?.isItog ? 'mt-7' : 'mt-[26px]'} ${divided ? 'border-t border-im-line pt-6' : ''} ${s.isItog ? 'rounded-[20px] bg-im-bg px-5 pb-5 pt-[18px]' : ''}`}
         >
-          <h3 className="m-0 mb-2.5 flex items-center gap-2.5 text-[17px] font-bold leading-[22px] text-im-ink">
+          <h3 className="m-0 mb-3.5 flex items-center gap-3 text-[18px] font-bold leading-6 tracking-[-0.01em] text-im-ink">
             {s.emoji && (
               <i className="im-sh-cookie12 grid h-[34px] w-[34px] flex-none place-items-center bg-im-butter text-[17px] not-italic" aria-hidden="true">
                 {s.emoji}
@@ -218,7 +269,8 @@ export function SummaryDocument({
           </h3>
           {s.body && <Md>{s.body}</Md>}
         </section>
-      ))}
+        );
+      })}
       {byline}
     </article>
   );
