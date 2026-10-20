@@ -183,8 +183,8 @@ function dropArrow(children: React.ReactNode): React.ReactNode {
 
 const mdComponents: Components = {
   p: ({ children }) => (startsWithArrow(children)
-    ? <p className="m-0 rounded-[14px] bg-im-tone px-3.5 py-2.5 text-im-on-tone [&+*]:mt-2.5">{dropArrow(children)}</p>
-    : <p className="m-0 [&+*]:mt-2.5">{children}</p>),
+    ? <p className="m-0 rounded-[14px] bg-im-tone px-4 py-3 text-im-on-tone [*+&]:mt-4 [&+*]:mt-3">{dropArrow(children)}</p>
+    : <p className="m-0 [&+*]:mt-3">{children}</p>),
   strong: ({ children }) => <strong className="font-semibold text-im-ink">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   a: ({ href, children }) => (
@@ -196,8 +196,8 @@ const mdComponents: Components = {
       {children}
     </a>
   ),
-  ul: ({ children }) => <ul className="im-ul m-0 flex list-none flex-col gap-2.5 p-0 [&+*]:mt-2.5 [li_&]:mt-2 [li_&]:gap-1.5">{children}</ul>,
-  ol: ({ children }) => <ol className="im-ol m-0 flex list-none flex-col gap-2.5 p-0 [&+*]:mt-2.5 [li_&]:mt-2 [li_&]:gap-1.5">{children}</ol>,
+  ul: ({ children }) => <ul className="im-ul m-0 flex list-none flex-col gap-3 p-0 [&+*]:mt-3 [li_&]:mt-2 [li_&]:gap-2">{children}</ul>,
+  ol: ({ children }) => <ol className="im-ol m-0 flex list-none flex-col gap-3 p-0 [&+*]:mt-3 [li_&]:mt-2 [li_&]:gap-2">{children}</ol>,
   li: ({ children }) => (
     <li className="flex gap-3">
       <i className="im-bullet im-sh-cookie9 mt-[7px] block h-[11px] w-[11px] flex-none bg-im-bullet" aria-hidden="true" />
@@ -211,7 +211,7 @@ const mdComponents: Components = {
   h5: ({ children }) => <h5 className="m-0 mt-3 text-[15px] font-semibold leading-6 text-im-ink">{children}</h5>,
   // h6 - подпись стороны («Альфа-Банк», «Insapp») над пунктами Действий (markSubLabels).
   h6: ({ children }) => (
-    <h6 className="m-0 mt-[18px] inline-block rounded-[10px] bg-im-bg px-2.5 py-0.5 text-[13px] font-semibold leading-5 text-im-ink2 first:mt-0 [&+*]:mt-2">{children}</h6>
+    <h6 className="m-0 mt-5 inline-block rounded-[12px] bg-im-bg px-3 py-1 text-[13px] font-semibold leading-5 text-im-ink2 first:mt-0 [&+*]:mt-2">{children}</h6>
   ),
   blockquote: ({ children }) => <blockquote className="m-0 border-l-2 border-im-line2 pl-3 text-im-mut">{children}</blockquote>,
   code: ({ children }) => <code className="rounded-md bg-im-tray px-1 py-px text-[0.92em]">{children}</code>,
@@ -240,13 +240,13 @@ export function SummaryDocument({
     <article className="im-doc">
       <div className="flex items-start gap-4">
         {doc.title ? (
-          <h2 className="im-balance m-0 min-w-0 flex-1 text-[21px] font-bold leading-7 tracking-[-0.012em] text-im-ink">{doc.title}</h2>
+          <h2 className="im-balance m-0 min-w-0 flex-1 text-[20px] font-bold leading-7 tracking-[-0.012em] text-im-ink">{splitEmoji(doc.title).text}</h2>
         ) : <span className="flex-1" />}
         {headerAction}
       </div>
-      {doc.meta && <p className="m-0 mt-2 text-[13px] leading-[19px] text-im-mut">{doc.meta}</p>}
+      {doc.meta && <p className="m-0 mt-2 text-[13px] leading-[19px] text-im-mutbg">{doc.meta}</p>}
       {doc.lead && (
-        <div className={`${doc.title ? 'mt-3.5' : ''} text-[16px] leading-[26px] text-im-ink2`}>
+        <div className={`${doc.title ? 'mt-4' : ''} text-[16px] leading-[26px] text-im-ink2`}>
           <Md>{doc.lead}</Md>
         </div>
       )}
@@ -257,15 +257,15 @@ export function SummaryDocument({
         return (
         <section
           key={`${s.title}-${i}`}
-          className={`text-[15.5px] leading-6 text-im-ink2 ${prev?.isItog ? 'mt-7' : 'mt-[26px]'} ${divided ? 'border-t border-im-line pt-6' : ''} ${s.isItog ? 'rounded-[20px] bg-im-bg px-5 pb-5 pt-[18px]' : ''}`}
+          className={`text-[15px] leading-6 text-im-ink2 ${prev?.isItog ? 'mt-8' : 'mt-6'} ${divided ? 'border-t border-im-line pt-6' : ''} ${s.isItog ? 'rounded-[20px] bg-im-bg px-5 pb-6 pt-5' : ''}`}
         >
-          <h3 className="m-0 mb-3.5 flex items-center gap-3 text-[18px] font-bold leading-6 tracking-[-0.01em] text-im-ink">
+          <h3 className="m-0 mb-4 flex items-start gap-3 text-[18px] font-bold leading-6 tracking-[-0.01em] text-im-ink">
             {s.emoji && (
               <i className="im-sh-cookie12 grid h-[34px] w-[34px] flex-none place-items-center bg-im-butter text-[17px] not-italic" aria-hidden="true">
                 {s.emoji}
               </i>
             )}
-            <span className="min-w-0">{s.title}</span>
+            <span className="min-w-0 pt-[5px]">{s.title}</span>
           </h3>
           {s.body && <Md>{s.body}</Md>}
         </section>
