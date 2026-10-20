@@ -952,6 +952,19 @@ async fn prepare_transcript_file<R: Runtime>(
     pool: &SqlitePool,
     meeting_id: &str,
 ) -> Result<(PathBuf, String), String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {}", e))?;
+    prepare_transcript_file_in(&app_data.join("ai-summary-temp"), pool, meeting_id).await
+}
+
+/// То же без окна приложения: файл транскрипта - в указанной папке (examples/resummarize.rs).
+pub async fn prepare_transcript_file_in(
+    temp_dir: &std::path::Path,
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<(PathBuf, String), String> {
     // Текст - вычитанный, если вычитка была (см. transcript_polish).
     let rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
         "SELECT COALESCE(polished, transcript), timestamp, audio_start_time, audio_end_time
@@ -1024,12 +1037,7 @@ async fn prepare_transcript_file<R: Runtime>(
         }
     }
 
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("app_data_dir: {}", e))?;
-    let temp_dir = app_data.join("ai-summary-temp");
-    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("mkdir: {}", e))?;
+    std::fs::create_dir_all(temp_dir).map_err(|e| format!("mkdir: {}", e))?;
     let file = temp_dir.join(format!("{}-batch.md", meeting_id));
     std::fs::write(&file, buf).map_err(|e| format!("write: {}", e))?;
     Ok((file, title))
@@ -1817,6 +1825,13 @@ async fn save_summary_markdown<R: Runtime>(
     meeting_id: &str,
     markdown: &str,
 ) -> Result<(), String> {
+    store_summary_markdown(pool, meeting_id, markdown).await?;
+    let _ = app.emit("summary-updated", serde_json::json!({ "meeting_id": meeting_id }));
+    Ok(())
+}
+
+/// Сохранить резюме и отправить его на сервер - без окна приложения (examples/resummarize.rs).
+pub async fn store_summary_markdown(pool: &SqlitePool, meeting_id: &str, markdown: &str) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     let result_json = serde_json::json!({
         "markdown": markdown,
@@ -1871,9 +1886,20 @@ async fn save_summary_markdown<R: Runtime>(
         .await;
         log::info!("[bulk-summary] отправка резюме {}: {}", meeting_id, st);
     }
-
-    let _ = app.emit("summary-updated", serde_json::json!({ "meeting_id": meeting_id }));
     Ok(())
+}
+
+/// Пересобрать резюме встречи без окна приложения - тем же запуском, что фоновое задание (после ручной правки
+/// имён участников в базе, 20.10.2026). Возвращает новое резюме; оно уже сохранено и отправлено на сервер.
+pub async fn summarize_headless(pool: &SqlitePool, meeting_id: &str) -> Result<String, String> {
+    let settings = load_ai_settings(pool).await;
+    let dir = std::env::temp_dir().join("insapp-meet-summary");
+    let (file, title) = prepare_transcript_file_in(&dir, pool, meeting_id).await?;
+    let result = run_cli_once(&settings, &file, &title, false).await;
+    let _ = std::fs::remove_file(&file);
+    let markdown = result?;
+    store_summary_markdown(pool, meeting_id, &markdown).await?;
+    Ok(markdown)
 }
 
 // ------------------------------------------------------------
