@@ -574,6 +574,17 @@ jobs:
           path: frontend/src-tauri/binaries/ffmpeg-*
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}    
 
+      # Whisper (ggml) под Windows - переносимо, без AVX-512 машины сборки: иначе на процессорах без AVX-512
+      # запись падает с 0xc000001d (0.4.11, Ryzen 5 1600). Подробности - frontend/src-tauri/cmake/ggml-portable.cmake.
+      - name: Portable ggml for Windows (no host AVX-512)
+        if: contains(inputs.platform, 'windows')
+        shell: bash
+        run: |
+          echo "CMAKE_PROJECT_INCLUDE_BEFORE=$(cygpath -m "$GITHUB_WORKSPACE")/frontend/src-tauri/cmake/ggml-portable.cmake" >> "$GITHUB_ENV"
+          # Собранный ранее ggml (кэш rust-cache) - удалить, иначе cmake не переконфигурируется с новым набором.
+          find target -maxdepth 4 -type d -name 'whisper-rs-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+          echo "ggml: GGML_NATIVE=OFF, GGML_AVX512=OFF (AVX2)"
+
       - name: Build with Tauri
         id: tauri-build
         uses: tauri-apps/tauri-action@v0

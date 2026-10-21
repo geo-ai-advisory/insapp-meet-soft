@@ -147,6 +147,13 @@ jobs:
           path: frontend/src-tauri/binaries/ffmpeg-*.exe
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
 
+      # Whisper (ggml) - переносимо, без AVX-512 машины сборки (как в build.yml, см. cmake/ggml-portable.cmake).
+      - name: Portable ggml (no host AVX-512)
+        shell: bash
+        run: |
+          echo "CMAKE_PROJECT_INCLUDE_BEFORE=$(cygpath -m "$GITHUB_WORKSPACE")/frontend/src-tauri/cmake/ggml-portable.cmake" >> "$GITHUB_ENV"
+          find target -maxdepth 4 -type d -name 'whisper-rs-sys-*' -prune -exec rm -rf {} + 2>/dev/null || true
+
       - name: Build Tauri app (unsigned)
         uses: tauri-apps/tauri-action@v0
         env:
