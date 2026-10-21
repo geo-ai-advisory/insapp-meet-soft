@@ -540,6 +540,11 @@ jobs:
       - name: Build llama-helper sidecar (macOS/Linux)
         if: "!contains(inputs.platform, 'windows')"
         shell: bash
+        env:
+          # 21.10.2026: образ macOS-машин GitHub (12.10) принёс OpenSSL, где X509_get_subject_name отдаёт const -
+          # cpp-httplib внутри llama.cpp перестал компилироваться. llama-helper сеть не нужна (модели качает
+          # приложение), поэтому OpenSSL не ищем: llama-cpp-sys-2 пробрасывает CMAKE_* в cmake.
+          CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: "ON"
         run: |
           echo "Building llama-helper sidecar..."
 
