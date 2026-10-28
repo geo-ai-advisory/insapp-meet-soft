@@ -55,6 +55,42 @@ export function pickLiveNamesToSave(
 }
 
 /**
+ * Подставить имена, узнанные по голосу во время записи (событие speakers-recognized).
+ * Имя, данное пользователем, узнавание не трогает - ни у его номера, ни у другого номера с тем же
+ * именем. Угаданное имя - только догадка и идёт за голосом: номер узнан как другой человек - имя
+ * меняется, имя узнано у другого номера - переезжает туда. Geo 28.10: на 35-й минуте номер узнался
+ * как коллега, потом разметка отдала номер гостю со стороны партнёра, и до конца встречи гость шёл
+ * под именем коллеги - узнавание видело ошибку, но подставленное имя больше не менялось.
+ * Возвращает новые имена и номера с угаданными именами; null - ничего не изменилось.
+ */
+export function applyRecognized(
+  names: Record<string, string>,
+  autoKeys: string[],
+  items: { speaker: string; name: string }[],
+): { names: Record<string, string>; auto: string[] } | null {
+  const auto = new Set(autoKeys);
+  const next = { ...names };
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  let changed = false;
+  for (const it of items) {
+    const name = (it.name || '').trim();
+    if (!it.speaker || !name) continue;
+    const cur = next[it.speaker];
+    if (cur && (!auto.has(it.speaker) || same(cur, name))) continue;
+    const holder = Object.keys(next).find((k) => k !== it.speaker && same(next[k], name));
+    if (holder && !auto.has(holder)) continue;
+    if (holder) {
+      delete next[holder];
+      auto.delete(holder);
+    }
+    next[it.speaker] = name;
+    auto.add(it.speaker);
+    changed = true;
+  }
+  return changed ? { names: next, auto: Array.from(auto) } : null;
+}
+
+/**
  * Новая запись - имена с прошлой (прерванной, несохранённой) записи не переносим:
  * номера голосов у новой записи свои, «Собеседник 1» там - уже другой человек.
  */
@@ -93,8 +129,8 @@ export interface SpeakerNamesApi {
  *  - сохранённая встреча: имена из api_get_speaker_names, сохранение - api_set_speaker_name
  *    + переотправка встречи на сервер (дашборд и ссылка «Поделиться» видят новое имя);
  *  - идёт запись (meetingId нет): имена живут в sessionStorage, приложение присылает
- *    узнанные по голосу имена событием speakers-recognized - подставляем только тем,
- *    кого пользователь ещё не назвал, и только имена, которых ещё нет в этой встрече.
+ *    узнанные по голосу имена событием speakers-recognized - подставляем тем, кого
+ *    пользователь не назвал сам; угаданное имя идёт за голосом (см. applyRecognized).
  *
  * enabled=false - хук ничего не грузит и не слушает (имена пришли снаружи).
  */
@@ -130,9 +166,8 @@ export function useSpeakerNames(meetingId?: string, enabled: boolean = true): Sp
     return () => { alive = false; };
   }, [meetingId, enabled]);
 
-  // Голоса коллег: во время записи приложение узнаёт собеседников по голосам из прошлых
-  // встреч (имя, данное человеку раньше) и присылает имена. Подставляем только тем, кого
-  // пользователь ещё не назвал, и только имена, которых ещё нет в этой встрече.
+  // Голоса коллег: во время записи приложение раз в 10 с узнаёт собеседников по голосам из
+  // прошлых встреч (имя, данное человеку раньше) и присылает имена (см. applyRecognized).
   useEffect(() => {
     if (!enabled || meetingId) return;
     let unlisten: (() => void) | undefined;
@@ -142,23 +177,14 @@ export function useSpeakerNames(meetingId?: string, enabled: boolean = true): Sp
         listen<{ items: { speaker: string; name: string }[] }>('speakers-recognized', (event) => {
           const items = event.payload?.items || [];
           if (items.length === 0) return;
-          setNames((prev) => {
-            const used = new Set(Object.values(prev).map((n) => n.trim().toLowerCase()));
-            let next: Record<string, string> | null = null;
-            for (const it of items) {
-              if (!it.speaker || !it.name || prev[it.speaker]) continue;
-              if (used.has(it.name.trim().toLowerCase())) continue;
-              next = next || { ...prev };
-              next[it.speaker] = it.name;
-              used.add(it.name.trim().toLowerCase());
-            }
-            if (!next) return prev;
-            try {
-              sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(next));
-            } catch { /* не сохранилось - имя всё равно видно на экране */ }
-            writeLiveAutoKeys([...readLiveAutoKeys(), ...Object.keys(next).filter((k) => !prev[k])]);
-            return next;
-          });
+          // Имена - из сессии: туда же сразу пишет переименование (saveName).
+          const res = applyRecognized(readLiveNames(), readLiveAutoKeys(), items);
+          if (!res) return;
+          try {
+            sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(res.names));
+          } catch { /* не сохранилось - имя всё равно видно на экране */ }
+          writeLiveAutoKeys(res.auto);
+          setNames(res.names);
         }),
       )
       .then((fn) => { if (alive) unlisten = fn; else fn(); })
@@ -169,6 +195,9 @@ export function useSpeakerNames(meetingId?: string, enabled: boolean = true): Sp
   // Идёт запись: имена отдаём приложению. Раз в 30 с оно пересматривает, кто есть кто, и без
   // имён могло отдать голос названного человека другому номеру - имя оставалось на пустом
   // номере, человек пропадал из списка (Geo 02.10). С именами названный номер в приоритете.
+  // Угаданные по голосу имена тоже отдаём: ошибочное не застрянет - узнавание его поправит
+  // (applyRecognized), а без них разметка после встречи путала голоса чаще (прогон
+  // examples/names_live_replay.rs на встрече Geo 28.10).
   useEffect(() => {
     if (!enabled || meetingId) return;
     import('@tauri-apps/api/core')
