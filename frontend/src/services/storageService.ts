@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { Transcript } from '@/types';
-import { LIVE_SPEAKER_NAMES_KEY } from '@/hooks/useSpeakerNames';
+import { LIVE_SPEAKER_NAMES_KEY, pickLiveNamesToSave, readLiveAutoKeys, resetLiveSpeakerNames } from '@/hooks/useSpeakerNames';
 
 export interface SaveMeetingRequest {
   meetingTitle: string;
@@ -67,18 +67,22 @@ export class StorageService {
       try {
         const raw = sessionStorage.getItem(LIVE_SPEAKER_NAMES_KEY);
         const map: Record<string, string> = raw ? JSON.parse(raw) : {};
-        const keys = Object.keys(map);
-        if (keys.length > 0) {
-          for (const key of keys) {
-            await invoke('api_set_speaker_name', { meetingId, speakerKey: key, displayName: map[key] });
+        if (Object.keys(map).length > 0) {
+          // Сохранение уже подписало собеседников по голосу всей записи - эти имена знаем,
+          // чтобы угаданные в начале записи их не перебили.
+          let saved: Record<string, string> = {};
+          try { saved = (await invoke<Record<string, string>>('api_get_speaker_names', { meetingId })) || {}; } catch { /* имён нет */ }
+          const toSave = pickLiveNamesToSave(map, readLiveAutoKeys(), saved);
+          for (const [key, name] of toSave) {
+            await invoke('api_set_speaker_name', { meetingId, speakerKey: key, displayName: name });
           }
           // Перезаливаем встречу на сервер - чтобы в дашборде и по ссылке
           // «Поделиться» были имена, а не автоподписи.
-          if (!skipServerUpload) {
+          if (toSave.length > 0 && !skipServerUpload) {
             try { await invoke('insapp_upload_meeting_by_id', { meetingId }); } catch { /* уедет позже */ }
           }
         }
-        sessionStorage.removeItem(LIVE_SPEAKER_NAMES_KEY);
+        resetLiveSpeakerNames();
       } catch (e) {
         console.warn('[insapp-meet] не удалось перенести имена участников во встречу', e);
       }

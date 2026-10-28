@@ -9,12 +9,61 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 export const LIVE_SPEAKER_NAMES_KEY = 'insapp_live_speaker_names';
 
 /**
+ * Номера голосов, которым имя во время записи подставило узнавание по голосу (а не пользователь).
+ * Такое имя угадано по первым секундам речи, пока разметка голосов ещё плывёт; при сохранении
+ * приложение узнаёт голоса заново по всей записи, и его ответ главнее (см. pickLiveNamesToSave).
+ */
+export const LIVE_SPEAKER_AUTO_KEY = 'insapp_live_speaker_names_auto';
+
+export function readLiveAutoKeys(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const v = JSON.parse(sessionStorage.getItem(LIVE_SPEAKER_AUTO_KEY) || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLiveAutoKeys(keys: string[]) {
+  try { sessionStorage.setItem(LIVE_SPEAKER_AUTO_KEY, JSON.stringify(Array.from(new Set(keys)))); } catch { /* имя всё равно видно на экране */ }
+}
+
+/**
+ * Какие имена из записи переносить в сохранённую встречу.
+ * Имя, данное пользователем, - всегда. Имя, угаданное по голосу во время записи, - только если
+ * окончательное узнавание при сохранении этого собеседника не назвало и такого имени во встрече ещё
+ * нет. Geo 28.10: в начале записи номер 1 узнался по голосу как коллега, потом разметка отдала этот
+ * номер гостю со стороны партнёра; при сохранении приложение верно узнало гостя (0.90), но перенос живых
+ * имён перезаписал его именем коллеги - во встрече стало два одинаковых имени, резюме приписало чужие слова.
+ */
+export function pickLiveNamesToSave(
+  live: Record<string, string>,
+  autoKeys: string[],
+  saved: Record<string, string>,
+): [string, string][] {
+  const auto = new Set(autoKeys);
+  const used = new Set(Object.values(saved).map((n) => n.trim().toLowerCase()));
+  const out: [string, string][] = [];
+  for (const [key, name] of Object.entries(live)) {
+    if (!name.trim()) continue;
+    if (auto.has(key) && (saved[key] || used.has(name.trim().toLowerCase()))) continue;
+    out.push([key, name]);
+    used.add(name.trim().toLowerCase());
+  }
+  return out;
+}
+
+/**
  * Новая запись - имена с прошлой (прерванной, несохранённой) записи не переносим:
  * номера голосов у новой записи свои, «Собеседник 1» там - уже другой человек.
  */
 export function resetLiveSpeakerNames() {
   if (typeof window === 'undefined') return;
-  try { sessionStorage.removeItem(LIVE_SPEAKER_NAMES_KEY); } catch { /* нет хранилища - нечего чистить */ }
+  try {
+    sessionStorage.removeItem(LIVE_SPEAKER_NAMES_KEY);
+    sessionStorage.removeItem(LIVE_SPEAKER_AUTO_KEY);
+  } catch { /* нет хранилища - нечего чистить */ }
 }
 
 /** Автоподпись голоса: "mic" -> «Вы», "system" -> «Собеседник», "system_N" -> «Собеседник N». */
@@ -107,6 +156,7 @@ export function useSpeakerNames(meetingId?: string, enabled: boolean = true): Sp
             try {
               sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(next));
             } catch { /* не сохранилось - имя всё равно видно на экране */ }
+            writeLiveAutoKeys([...readLiveAutoKeys(), ...Object.keys(next).filter((k) => !prev[k])]);
             return next;
           });
         }),
@@ -142,6 +192,8 @@ export function useSpeakerNames(meetingId?: string, enabled: boolean = true): Sp
           const map: Record<string, string> = raw ? JSON.parse(raw) : {};
           if (name.trim()) map[key] = name.trim(); else delete map[key];
           sessionStorage.setItem(LIVE_SPEAKER_NAMES_KEY, JSON.stringify(map));
+          // Назвал сам - имя пользователя, при сохранении оно главнее узнавания по голосу.
+          writeLiveAutoKeys(readLiveAutoKeys().filter((k) => k !== key));
         } catch { /* не сохранилось - имя всё равно видно на экране */ }
       }
       return;
