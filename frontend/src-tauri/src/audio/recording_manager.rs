@@ -488,6 +488,30 @@ impl RecordingManager {
         self.recording_saver.get_meeting_folder().map(|p| p.clone())
     }
 
+    /// Пересоздать потоки звука на заданных устройствах, не прерывая запись (смена наушников и колонок
+    /// во время записи, см. device_watch). Микрофон не открылся - пишем с микрофона по умолчанию, а если
+    /// и он недоступен - только собеседников; ошибка возвращается, чтобы слежение попробовало ещё раз.
+    pub async fn restart_streams(
+        &mut self,
+        microphone: Option<Arc<AudioDevice>>,
+        system: Option<Arc<AudioDevice>>,
+    ) -> Result<()> {
+        if let Err(e) = self.stream_manager.stop_streams() {
+            warn!("⚠️ Старые потоки звука остановились с ошибкой: {}", e);
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let err = match self.stream_manager.start_streams(microphone, system.clone(), None).await {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        };
+        warn!("⚠️ Микрофон не открылся ({}) - пробую микрофон по умолчанию", err);
+        let fallback = super::devices::default_input_device().ok().map(Arc::new);
+        if self.stream_manager.start_streams(fallback, system.clone(), None).await.is_err() {
+            let _ = self.stream_manager.start_streams(None, system, None).await;
+        }
+        Err(err)
+    }
+
     /// Check for device events (disconnects/reconnects)
     /// Returns Some(DeviceEvent) if an event occurred, None otherwise
     pub fn poll_device_events(&mut self) -> Option<DeviceEvent> {

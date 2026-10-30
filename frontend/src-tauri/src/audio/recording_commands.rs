@@ -110,6 +110,40 @@ fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
         }
     });
 }
+
+/// Поколение слежения за устройствами: новая запись - новое поколение, старый цикл выходит сам.
+static DEVICE_WATCH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Смена наушников и колонок во время записи (см. audio::device_watch): сменилась обстановка -
+/// потоки звука пересоздаются, запись идёт дальше. `with_system` - пишется ли звук собеседников.
+fn spawn_device_watch(with_system: bool) {
+    use crate::audio::device_watch::{read_scene, watch, RestartFuture, Scene, WatchTiming};
+    let generation = DEVICE_WATCH_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let restart = move |scene: Scene| -> RestartFuture { Box::pin(restart_streams_on(scene, with_system)) };
+    let alive = move || DEVICE_WATCH_GENERATION.load(Ordering::SeqCst) == generation && IS_RECORDING.load(Ordering::SeqCst);
+    tauri::async_runtime::spawn(watch(read_scene, restart, alive, with_system, WatchTiming::LIVE));
+}
+
+/// Пересоздать потоки записи на устройствах обстановки (микрофон, вывод - звук собеседников).
+async fn restart_streams_on(scene: crate::audio::device_watch::Scene, with_system: bool) -> Result<(), String> {
+    let mic = scene.mic.map(|d| Arc::new(super::AudioDevice::new(d.name, super::DeviceType::Input)));
+    let system = if with_system {
+        scene.output.map(|d| Arc::new(super::AudioDevice::new(d.name, super::DeviceType::Output)))
+    } else {
+        None
+    };
+    tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(async {
+            let mut guard = RECORDING_MANAGER.lock().unwrap();
+            match guard.as_mut() {
+                Some(manager) => manager.restart_streams(mic, system).await.map_err(|e| e.to_string()),
+                None => Ok(()),
+            }
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
@@ -234,6 +268,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // ============================================================================
     // MICROPHONE DEVICE RESOLUTION: Preference → Default → Error
     // ============================================================================
+    // Микрофон, выбранный в настройках, - для слежения за устройствами (вернётся - пишем снова с него).
+    crate::audio::device_watch::set_preferred_mic(preferred_mic_name.clone());
     let microphone_device = match preferred_mic_name {
         Some(pref_name) => {
             info!("🎤 Attempting to use preferred microphone: '{}'", pref_name);
@@ -342,6 +378,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
+    let with_system = system_device.is_some();
     let transcription_receiver = manager
         .start_recording(microphone_device, system_device, auto_save)
         .await
@@ -357,6 +394,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
     reset_speech_detected_flag(); // Reset for new recording session
+    // Наушники отключились и вернулись, сменился вывод - потоки звука пересоздаются сами.
+    spawn_device_watch(with_system);
     // Пилюля-индикатор записи: показать в момент РЕАЛЬНОГО старта записи
     // (привязка к настоящему состоянию, а не к фронтовым событиям).
     crate::recording_indicator::show(&app);
@@ -573,6 +612,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
 
     // Start recording with specified devices and auto_save setting
+    let with_system = system_device.is_some();
+    crate::audio::device_watch::set_preferred_mic(mic_device_name.clone());
     let transcription_receiver = manager
         .start_recording(mic_device, system_device, auto_save)
         .await
@@ -588,6 +629,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
     reset_speech_detected_flag(); // Reset for new recording session
+    // Наушники отключились и вернулись, сменился вывод - потоки звука пересоздаются сами.
+    spawn_device_watch(with_system);
     // Пилюля-индикатор записи: показать в момент РЕАЛЬНОГО старта записи
     // (привязка к настоящему состоянию, а не к фронтовым событиям).
     crate::recording_indicator::show(&app);
@@ -1365,6 +1408,9 @@ pub async fn attempt_device_reconnect(
         }
     } // Release lock
 
+    let device_name_for_watch = device_name.clone();
+    let is_mic = matches!(monitor_type, DeviceMonitorType::Microphone);
+
     // Spawn blocking task to handle the async reconnection
     let result = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async {
@@ -1383,6 +1429,11 @@ pub async fn attempt_device_reconnect(
         Ok(success) => {
             if success {
                 info!("✅ Manual reconnection successful");
+                // Микрофон выбран руками - слежение за устройствами возвращается к нему, а не к микрофону по умолчанию.
+                if is_mic {
+                    crate::audio::device_watch::set_preferred_mic(Some(device_name_for_watch.clone()));
+                }
+                crate::audio::device_watch::mark_restarted();
             } else {
                 warn!("❌ Manual reconnection failed - device not available");
             }

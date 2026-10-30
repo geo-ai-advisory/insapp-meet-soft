@@ -110,12 +110,12 @@ pub enum SpeakerRole {
 /// разделение собеседников не работало вовсе (то слипалось в «Вы», то дробилось
 /// до потолка в 6 собеседников). Без оптимизаций результат совпадает с эталонным
 /// onnxruntime до 7-го знака, скорость практически та же. НЕ ВКЛЮЧАТЬ обратно.
-pub(crate) struct VoiceModel {
+pub struct VoiceModel {
     session: Session,
 }
 
 impl VoiceModel {
-    pub(crate) fn load(path: &Path) -> Result<Self, String> {
+    pub fn load(path: &Path) -> Result<Self, String> {
         let session = Session::builder()
             .and_then(|b| b.with_optimization_level(GraphOptimizationLevel::Disable))
             .and_then(|b| b.with_intra_threads(2))
@@ -125,7 +125,7 @@ impl VoiceModel {
     }
 
     /// Отпечаток голоса (единичной длины). `samples` - моно 16 кГц в диапазоне [-1, 1].
-    pub(crate) fn embed(&mut self, samples: &[f32]) -> Option<Vec<f32>> {
+    pub fn embed(&mut self, samples: &[f32]) -> Option<Vec<f32>> {
         let clean: Vec<f32> = samples.iter().map(|x| x.clamp(-1.0, 1.0)).collect();
         // Kaldi fbank 80 + вычитание среднего по времени - как при обучении модели.
         let feats = knf_rs::compute_fbank(&clean).ok()?;
@@ -331,7 +331,7 @@ pub fn segment_key(at_sec: f64) -> i64 {
 }
 
 /// Путь к файлу модели в общей папке моделей приложения.
-pub(crate) fn model_path() -> Option<PathBuf> {
+pub fn model_path() -> Option<PathBuf> {
     crate::parakeet_engine::commands::get_models_directory().map(|d| d.join(WESPEAKER_FILE))
 }
 
