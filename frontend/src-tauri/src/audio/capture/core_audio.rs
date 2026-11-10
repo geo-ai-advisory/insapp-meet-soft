@@ -95,8 +95,13 @@ impl CoreAudioCapture {
                 anyhow::anyhow!("Failed to create process tap: {:?}", e)
             })?;
 
-        // Get tap information
-        let tap_uid = tap.uid().unwrap_or_else(|_| cf::Uuid::new().to_cf_string());
+        // Get tap information. Во время смены устройства (отключились Bluetooth-наушники) macOS может отдать уже
+        // недействительный отвод ('!obj'): это ошибка запуска, а не паника - паника здесь случалась под замком записи,
+        // после неё «Стоп» больше не срабатывал (10.11.2026). Слежение за устройствами повторит через 2 с.
+        let tap_uid = tap.uid().map_err(|e| {
+            error!("❌ CoreAudio: Process tap is not valid (device is changing?): {:?}", e);
+            anyhow::anyhow!("Process tap is not valid: {:?}", e)
+        })?;
         let tap_asbd = tap.asbd();
 
         match tap_asbd {
@@ -113,7 +118,7 @@ impl CoreAudioCapture {
         // Create sub-tap dictionary
         let sub_tap = cf::DictionaryOf::with_keys_values(
             &[ca::sub_device_keys::uid()],
-            &[tap.uid().unwrap().as_type_ref()],
+            &[tap_uid.as_type_ref()],
         );
 
         // Create aggregate device descriptor

@@ -207,7 +207,7 @@ pub async fn auto_name_meeting(pool: &SqlitePool, meeting_id: &str, voices: &[(u
 /// Выучить голоса одной встречи по звуку записи (встречи, сохранённые до этой функции).
 /// Метки собеседников пересматриваются так же, как после записи (с сохранением номеров),
 /// поэтому имена меток попадают к правильным голосам.
-fn learn_from_audio(
+pub fn learn_from_audio(
     model: &mut VoiceModel,
     audio: &std::path::Path,
     segs: &[(String, f64, f64)],

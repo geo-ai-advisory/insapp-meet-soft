@@ -46,6 +46,20 @@ pub fn is_recording_now() -> bool {
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 
+/// Замок, переживающий панику внутри себя. Паника под замком записи (10.11.2026: macOS отдала недействительный
+/// отвод звука, когда отключились AirPods) «отравляла» его - и дальше молча не работали «Стоп», сохранение
+/// расшифровки и пересмотр разметки, пока окно не закрыли и встреча не пропала.
+fn lock_recovering<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| {
+        warn!("Замок записи был отравлен паникой - продолжаю с текущим состоянием");
+        poisoned.into_inner()
+    })
+}
+
+fn recording_manager() -> std::sync::MutexGuard<'static, Option<RecordingManager>> {
+    lock_recovering(&RECORDING_MANAGER)
+}
+
 /// Поколение фонового пересмотра разметки: новая запись - новое поколение, старая
 /// задача (если ещё спит) по нему понимает, что ей пора завершиться.
 static RELABEL_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -70,7 +84,7 @@ fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
                 break;
             }
             // Запись закончилась - итог посчитает выгрузка модели (final_relabel).
-            let recording = RECORDING_MANAGER.lock().map(|m| m.is_some()).unwrap_or(false);
+            let recording = recording_manager().is_some();
             if !recording {
                 break;
             }
@@ -97,10 +111,8 @@ fn spawn_live_relabel<R: Runtime>(app: AppHandle<R>) {
                 continue;
             }
             let map: std::collections::HashMap<i64, usize> = changes.iter().cloned().collect();
-            if let Ok(guard) = RECORDING_MANAGER.lock() {
-                if let Some(manager) = guard.as_ref() {
-                    manager.relabel_speakers(&map);
-                }
+            if let Some(manager) = recording_manager().as_ref() {
+                manager.relabel_speakers(&map);
             }
             let payload: Vec<serde_json::Value> = changes
                 .iter()
@@ -134,7 +146,7 @@ async fn restart_streams_on(scene: crate::audio::device_watch::Scene, with_syste
     };
     tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async {
-            let mut guard = RECORDING_MANAGER.lock().unwrap();
+            let mut guard = recording_manager();
             match guard.as_mut() {
                 Some(manager) => manager.restart_streams(mic, system).await.map_err(|e| e.to_string()),
                 None => Ok(()),
@@ -386,7 +398,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Store the manager globally to keep it alive
     {
-        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        let mut global_manager = recording_manager();
         *global_manager = Some(manager);
     }
 
@@ -429,10 +441,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                 };
 
                 // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
+                if let Some(manager) = recording_manager().as_ref() {
+                    manager.add_transcript_segment(segment);
                 }
             }
         });
@@ -621,7 +631,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Store the manager globally to keep it alive
     {
-        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        let mut global_manager = recording_manager();
         *global_manager = Some(manager);
     }
 
@@ -664,10 +674,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                 };
 
                 // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
+                if let Some(manager) = recording_manager().as_ref() {
+                    manager.add_transcript_segment(segment);
                 }
             }
         });
@@ -724,7 +732,7 @@ pub async fn stop_recording<R: Runtime>(
 
     // Step 1: Stop audio capture immediately (no more new chunks) with proper error handling
     let manager_for_cleanup = {
-        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        let mut global_manager = recording_manager();
         global_manager.take()
     };
 
@@ -1142,7 +1150,7 @@ pub async fn pause_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String
     }
 
     // Access the recording manager and pause it
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
     if let Some(manager) = manager_guard.as_ref() {
         manager.pause_recording().map_err(|e| e.to_string())?;
 
@@ -1176,7 +1184,7 @@ pub async fn resume_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), Strin
     }
 
     // Access the recording manager and resume it
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
     if let Some(manager) = manager_guard.as_ref() {
         manager.resume_recording().map_err(|e| e.to_string())?;
 
@@ -1202,7 +1210,7 @@ pub async fn resume_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), Strin
 /// Check if recording is currently paused
 #[tauri::command]
 pub async fn is_recording_paused() -> bool {
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
     if let Some(manager) = manager_guard.as_ref() {
         manager.is_paused()
     } else {
@@ -1214,7 +1222,7 @@ pub async fn is_recording_paused() -> bool {
 #[tauri::command]
 pub async fn get_recording_state() -> serde_json::Value {
     let is_recording = IS_RECORDING.load(Ordering::SeqCst);
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
 
     if let Some(manager) = manager_guard.as_ref() {
         serde_json::json!({
@@ -1243,7 +1251,7 @@ pub async fn get_recording_state() -> serde_json::Value {
 /// Returns the path if a meeting name was set and folder structure initialized
 #[tauri::command]
 pub async fn get_meeting_folder_path() -> Result<Option<String>, String> {
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
     if let Some(manager) = manager_guard.as_ref() {
         Ok(manager.get_meeting_folder().map(|p| p.to_string_lossy().to_string()))
     } else {
@@ -1255,7 +1263,7 @@ pub async fn get_meeting_folder_path() -> Result<Option<String>, String> {
 /// Used for syncing frontend state after page reload during active recording
 #[tauri::command]
 pub async fn get_transcript_history() -> Result<Vec<crate::audio::recording_saver::TranscriptSegment>, String> {
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
 
     if let Some(manager) = manager_guard.as_ref() {
         Ok(manager.get_transcript_segments())
@@ -1268,7 +1276,7 @@ pub async fn get_transcript_history() -> Result<Vec<crate::audio::recording_save
 /// Used for syncing frontend state after page reload during active recording
 #[tauri::command]
 pub async fn get_recording_meeting_name() -> Result<Option<String>, String> {
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
 
     if let Some(manager) = manager_guard.as_ref() {
         Ok(manager.get_meeting_name())
@@ -1334,7 +1342,7 @@ pub struct DisconnectedDeviceInfo {
 /// Should be called periodically (every 1-2 seconds) by frontend during recording
 #[tauri::command]
 pub async fn poll_audio_device_events() -> Result<Option<DeviceEventResponse>, String> {
-    let mut manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let mut manager_guard = recording_manager();
 
     if let Some(manager) = manager_guard.as_mut() {
         if let Some(event) = manager.poll_device_events() {
@@ -1353,7 +1361,7 @@ pub async fn poll_audio_device_events() -> Result<Option<DeviceEventResponse>, S
 /// Returns whether the system is attempting to reconnect and which device
 #[tauri::command]
 pub async fn get_reconnection_status() -> Result<ReconnectionStatus, String> {
-    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    let manager_guard = recording_manager();
 
     if let Some(manager) = manager_guard.as_ref() {
         let state = manager.get_state();
@@ -1402,7 +1410,7 @@ pub async fn attempt_device_reconnect(
 
     // Check if recording is active
     {
-        let manager_guard = RECORDING_MANAGER.lock().unwrap();
+        let manager_guard = recording_manager();
         if manager_guard.is_none() {
             return Err("Recording not active".to_string());
         }
@@ -1414,7 +1422,7 @@ pub async fn attempt_device_reconnect(
     // Spawn blocking task to handle the async reconnection
     let result = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async {
-            let mut manager_guard = RECORDING_MANAGER.lock().unwrap();
+            let mut manager_guard = recording_manager();
             if let Some(manager) = manager_guard.as_mut() {
                 manager.attempt_device_reconnect(&device_name, monitor_type).await
             } else {
@@ -1540,4 +1548,25 @@ pub async fn discard_recording<R: Runtime>(
     let _ = std::fs::File::create(dest.join(".deleted"));
     info!("[recording] запись удалена без сохранения: {}", target.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::lock_recovering;
+    use std::sync::{Arc, Mutex};
+
+    /// Паника под замком (как 10.11.2026 при отключении AirPods) не должна ломать «Стоп»: замок остаётся рабочим.
+    #[test]
+    fn poisoned_lock_stays_usable() {
+        let m = Arc::new(Mutex::new(1));
+        let m2 = m.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = m2.lock().unwrap();
+            panic!("паника под замком");
+        })
+        .join();
+        assert!(m.is_poisoned());
+        *lock_recovering(&m) += 1;
+        assert_eq!(*lock_recovering(&m), 2);
+    }
 }
